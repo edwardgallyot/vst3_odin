@@ -172,7 +172,7 @@ IPluginFactory3_iid :: "4555a2ab-c123-4e57-9b12-291036878931"
 
 IComponentVtbl :: struct #packed {
     using plugin_base: IPluginBaseVtbl,
-    get_controller_class_id: proc "c" (rawptr, TUID) -> Result,
+    get_controller_class_id: proc "c" (rawptr, [^]u8) -> Result,
     set_io_mode: proc "c" (rawptr, IoMode) -> Result,
     get_bus_count: proc "c" (rawptr, MediaType, BusDirection) -> i32,
     get_bus_info: proc "c" (rawptr, MediaType, BusDirection, i32, ^BusInfo) -> Result,
@@ -562,8 +562,8 @@ IInterAppAudioPresetManager_iid :: "ade6fcc4-46c9-4e1d-b3b4-9a80c93fefdd"
 
 IAudioProcessorVtbl :: struct #packed {
     using unknown: FUnknownVtbl,
-    set_bus_arrangements: proc "c" (rawptr, ^SpeakerArrangement, i32, ^SpeakerArrangement, i32) -> Result,
-    get_bus_arrangements: proc "c" (rawptr, BusDirection, i32, ^SpeakerArrangement, i32) -> Result,
+    set_bus_arrangements: proc "c" (rawptr, [^]SpeakerArrangement, i32, [^]SpeakerArrangement, i32) -> Result,
+    get_bus_arrangements: proc "c" (rawptr, BusDirection, i32, ^SpeakerArrangement) -> Result,
     can_process_sample_size: proc "c" (rawptr, SymbolicSampleSize) -> Result,
     get_latency_samples: proc "c" (rawptr) -> Result,
     setup_processing: proc "c" (rawptr, ^ProcessSetup) -> Result,

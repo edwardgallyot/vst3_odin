@@ -250,7 +250,7 @@ PhysicalUITypeID :: enum u32 {
     InvalidPUITypeID = 0xFFFFFFFF
 }
 
-Cardinality :: enum {
+Cardinality :: enum i32 {
     ManyInstances = 0x7FFFFFFF
 }
 
@@ -270,7 +270,6 @@ Result :: enum c.int32_t {
 MediaType :: enum i32 {
     Audio = 0,
     Event,
-    NumMediaTypes
 } 
 
 BusDirection :: enum i32 {
@@ -283,7 +282,7 @@ BusType :: enum i32 {
     Aux
 } 
 
-BusFlags :: enum {
+BusFlags :: enum u32 {
     DefaultActive = 1 << 0,
     IsControlVoltage = 1 << 1
 } 
@@ -480,7 +479,7 @@ AutomationStates :: enum {
     ReadWriteState = 1 << 0 | 1 << 1 
 }
 
-ComponentFlags :: enum {
+ComponentFlags :: enum u32 {
     Distributable = 1 << 0,
     SimpleModeSupported = 1 << 1
 }

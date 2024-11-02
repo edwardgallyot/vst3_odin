@@ -11,6 +11,23 @@ import "core:unicode/utf16"
 import "core:slice"
 
 ExampleUuid :: "1002df00-56d3-4920-a394-1205f69854a6"
+ExampleControllerUuid :: "3981d015-fb51-43fb-9deb-03488f84c270"
+
+InputChannelCount :: 2
+OutputChannelCount :: 2
+MidiInputCount :: 0
+MidiOutputCount :: 0
+
+channel_count_to_speaker_arrangement :: proc (channel_count: u32) -> vst3.SpeakerArrangement {
+    // Do we event need to support more
+    if channel_count == 1 {
+        return vst3.SpeakerArrangement.MonoSpeaker
+    }
+    if channel_count == 2 {
+        return vst3.SpeakerArrangement.StereoSpeaker
+    }
+    return vst3.SpeakerArrangement.Empty
+}
 
 processor_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
     context = runtime.default_context()
@@ -37,11 +54,39 @@ processor_release :: proc "c" (this: rawptr) -> u32 {
     return p.ref_count
 }
 
-set_bus_arrangements :: proc "c" (rawptr, ^vst3.SpeakerArrangement, i32, ^vst3.SpeakerArrangement, i32) -> vst3.Result {
-    return vst3.Result.Ok
+set_bus_arrangements :: proc "c" (this: rawptr, inputs: [^]vst3.SpeakerArrangement, num_inputs: i32, outputs: [^]vst3.SpeakerArrangement, num_outputs: i32) -> vst3.Result {
+    context = runtime.default_context()
+    input_ok := true
+    for input, i in inputs[0:num_inputs] {
+        if i > 0 {
+            break
+        }
+        accepted_speaker := channel_count_to_speaker_arrangement(InputChannelCount)
+        input_ok = input_ok && (input == vst3.SpeakerArrangement.Empty || input == accepted_speaker)
+    }
+
+    output_ok := true
+    for output, i in outputs[0:num_outputs] {
+        if i > 0 {
+            break
+        }
+        accepted_speaker := channel_count_to_speaker_arrangement(OutputChannelCount)
+        output_ok = output_ok && (output == vst3.SpeakerArrangement.Empty || output == accepted_speaker)
+    }
+    
+    if input_ok && output_ok {
+        return vst3.Result.True
+    } else {
+        return vst3.Result.False
+    }
 }
 
-get_bus_arrangements :: proc "c" (rawptr, vst3.BusDirection, i32, ^vst3.SpeakerArrangement, i32) -> vst3.Result {
+get_bus_arrangements :: proc "c" (this: rawptr, bus_direction: vst3.BusDirection, index: i32, speaker: ^vst3.SpeakerArrangement) -> vst3.Result {
+    context = runtime.default_context()
+    switch bus_direction {
+    case .Input: speaker^ = channel_count_to_speaker_arrangement(InputChannelCount)
+    case .Output: speaker^ = channel_count_to_speaker_arrangement(OutputChannelCount)
+    }
     return vst3.Result.Ok
 }
 
@@ -169,7 +214,7 @@ set_param_normalised :: proc "c" (rawptr, u32, f64) -> vst3.Result {
 }
 
 set_component_handler :: proc "c" (rawptr, ^vst3.IComponentHandler) -> vst3.Result {
-    return vst3.Result.Ok
+    return vst3.Result.NotImplemented
 }
 
 create_view :: proc "c" (rawptr, cstring) -> ^vst3.IPlugView {
@@ -246,44 +291,114 @@ component_initialize :: proc "c" (this: rawptr, obj: ^vst3.FUnknown) -> vst3.Res
     return vst3.Result.True
 }
 
-componen_terminate :: proc "c" (this: rawptr) -> vst3.Result {
+component_terminate :: proc "c" (this: rawptr) -> vst3.Result {
     return vst3.Result.True
 }
 
-get_controller_class_id :: proc "c" (id: rawptr, tuid: vst3.TUID) -> vst3.Result {
+get_controller_class_id :: proc "c" (id: rawptr, tuid: [^]u8) -> vst3.Result {
+    context = runtime.default_context()
+    id := parse_uuid (ExampleControllerUuid) or_return
+    copy_slice(tuid[0:16], id[0:16])
     return vst3.Result.Ok
 }
 
 set_io_mode :: proc "c" (rawptr, vst3.IoMode) -> vst3.Result {
-    return vst3.Result.Ok
+    // Do we care?
+    return vst3.Result.NotImplemented
 }
 
-get_bus_count :: proc "c" (rawptr, vst3.MediaType, vst3.BusDirection) -> i32 {
+get_bus_count :: proc "c" (this: rawptr, media_type: vst3.MediaType, bus_direction: vst3.BusDirection) -> i32 {
+    switch media_type {
+    case .Audio: 
+        switch bus_direction {
+        case .Input: return InputChannelCount
+        case .Output: return OutputChannelCount
+        }
+    case .Event: 
+        switch bus_direction {
+        case .Input: return InputChannelCount
+        case .Output: return OutputChannelCount
+        }
+    }
     return 0
 }
 
-get_bus_info :: proc "c" (rawptr, vst3.MediaType, vst3.BusDirection, i32, ^vst3.BusInfo) -> vst3.Result {
+get_bus_info :: proc "c" (this: rawptr, media_type: vst3.MediaType, bus_direction: vst3.BusDirection, index: i32, info: ^vst3.BusInfo) -> vst3.Result {
+    context = runtime.default_context()
+
+    // Example is going to support main stereo bus, no auxes.
+    if index != 0 {
+        return vst3.Result.InvalidArgument
+    }
+
+    switch media_type {
+    case .Audio: 
+        switch bus_direction {
+        case .Input: 
+            info^ = {
+                media_type = media_type,
+                direction =  bus_direction,
+                channel_count = InputChannelCount,
+                bus_type =  vst3.BusType.Main,
+                flags = vst3.BusFlags.DefaultActive,
+            }
+            utf16.encode_string(info.name[:], "Audio Input")
+        case .Output: 
+            info^ = {
+                media_type = media_type,
+                direction =  bus_direction,
+                channel_count = OutputChannelCount,
+                bus_type =  vst3.BusType.Main,
+                flags = vst3.BusFlags.DefaultActive,
+            }
+            utf16.encode_string(info.name[:], "Audio Output")
+        }
+    case .Event: 
+        switch bus_direction {
+        case .Input: 
+            info^ = {
+                media_type = media_type,
+                direction =  bus_direction,
+                channel_count = MidiInputCount,
+                bus_type =  vst3.BusType.Main,
+                flags = vst3.BusFlags.DefaultActive,
+            }
+            utf16.encode_string(info.name[:], "MIDI Input")
+        case .Output: 
+            info^ = {
+                media_type = media_type,
+                direction =  bus_direction,
+                channel_count = MidiOutputCount,
+                bus_type =  vst3.BusType.Main,
+                flags = vst3.BusFlags.DefaultActive,
+            }
+            utf16.encode_string(info.name[:], "MIDI Output")
+        }
+    }
     return vst3.Result.Ok
 }
 
 get_routing_info :: proc "c" (rawptr, ^vst3.RoutingInfo, ^vst3.RoutingInfo) -> vst3.Result {
-    return vst3.Result.Ok
+    // Do we care?
+    return vst3.Result.NotImplemented
 }
 
 activate_bus :: proc "c" (rawptr, vst3.MediaType, vst3.BusDirection, i32, u8) -> vst3.Result {
+    // Do we care?
     return vst3.Result.Ok
 }
 
 set_active :: proc "c" (rawptr, u8) -> vst3.Result {
+    // Do we care?
     return vst3.Result.Ok
 }
 
 component_set_state :: proc "c" (rawptr, ^vst3.IBStream) -> vst3.Result {
-    return vst3.Result.Ok
+    return vst3.Result.NotImplemented
 }
 
 component_get_state :: proc "c" (rawptr, ^vst3.IBStream) -> vst3.Result {
-    return vst3.Result.Ok
+    return vst3.Result.NotImplemented
 }
 
 init_component :: proc (c: ^Component) {
@@ -291,7 +406,7 @@ init_component :: proc (c: ^Component) {
     c.add_ref = component_add_ref
     c.release = component_release
     c.initialize = component_initialize
-    c.terminate = componen_terminate 
+    c.terminate = component_terminate 
     c.get_controller_class_id = get_controller_class_id
     c.set_io_mode = set_io_mode
     c.get_bus_count = get_bus_count
@@ -338,13 +453,15 @@ parse_uuid :: proc (id: string) -> (uuid.Identifier, vst3.Result) {
 factory_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
     context = runtime.default_context()
 
+    f_unknown_id := parse_uuid(vst3.FUnknown_iid) or_return
     factory_id := parse_uuid(vst3.IPluginFactory_iid) or_return
     factory_2_id := parse_uuid(vst3.IPluginFactory2_iid) or_return
-    factory_w_id := parse_uuid(vst3.IPluginFactory3_iid) or_return
+    factory_3_id := parse_uuid(vst3.IPluginFactory3_iid) or_return
 
     if slice.equal(id[0:16], factory_id[:]) ||
-       slice.equal(id[0:16], factory_id[:]) ||
-       slice.equal(id[0:16], factory_id[:]) {
+       slice.equal(id[0:16], factory_2_id[:]) ||
+       slice.equal(id[0:16], factory_3_id[:]) ||
+       slice.equal(id[0:16], f_unknown_id[:]) {
         obj^ = this
         return vst3.Result.True
     }
@@ -353,17 +470,21 @@ factory_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> v
 }
 
 factory_add_ref :: proc "c" (this: rawptr) -> u32 {
-    return 0
+    f: ^Factory = auto_cast this
+    f.ref_count += 1
+    return f.ref_count
 }
 
 factory_release :: proc "c" (this: rawptr) -> u32 {
-    return 0
+    f: ^Factory = auto_cast this
+    f.ref_count -= 1
+    return f.ref_count
 }
 
 get_factory_info :: proc "c" (this: rawptr, info: ^vst3.PFactoryInfo) ->  vst3.Result {
     copy(info.url[0 : 256], "hello.com")
     copy(info.email[0 : 128], "edgallyot@gmail.com")
-    copy(info.vendor[0 : 64], "the bois")
+    copy(info.vendor[0 : 64], "Noice")
     info.flags = vst3.kDefaultFactoryFlags
     return vst3.Result.Ok
 }
@@ -375,6 +496,7 @@ count_classes :: proc "c" (this: rawptr) -> i32 {
 get_class_info :: proc "c" (this: rawptr, idx: i32, info: ^vst3.PClassInfo) -> vst3.Result {
     context = runtime.default_context()
     example_id := parse_uuid(ExampleUuid) or_return
+    mem.set(auto_cast info, 0, size_of(vst3.PClassInfo))
     copy_slice(info.cid[0:16], example_id[0:16])
     copy_from_string(info.name[0 : 64], "odin")
     copy_from_string(info.category[0 : 32], "Audio Module Class")
@@ -392,16 +514,17 @@ create_instance :: proc "c" (this: rawptr, class_id: [^]u8, interface_id: [^]u8,
 
         if slice.equal(f_unknown_id[0 : 16], iid) || slice.equal(i_component_id[0:16], iid) {
             plugin := make_plugin()
-            obj^ = auto_cast plugin
+            obj^ = auto_cast &plugin.component
             return vst3.Result.True
         }
     }
 
-    return vst3.Result.NotImplemented
+    return vst3.Result.NoInterface
 }
 
 get_class_info_2 :: proc "c" (this: rawptr, index: i32, info: ^vst3.PClassInfo2) -> vst3.Result {
     context = runtime.default_context()
+    mem.set(auto_cast info, 0, size_of(vst3.PClassInfo2))
     example_id := parse_uuid(ExampleUuid) or_return
     copy_slice(info.cid[0:16], example_id[0:16])
     info.cardinality = cast(i32)vst3.Cardinality.ManyInstances
@@ -409,7 +532,7 @@ get_class_info_2 :: proc "c" (this: rawptr, index: i32, info: ^vst3.PClassInfo2)
     copy_from_string(info.name[:], "odin")
     info.class_flags = cast(u32)vst3.ComponentFlags.SimpleModeSupported
     copy_from_string(info.sub_categories[0 : 128], vst3.kInstrument)
-    copy_from_string(info.vendor[0 : 64], "Sami")
+    copy_from_string(info.vendor[0 : 64], "Noice")
     copy_from_string(info.version[0 : 64], "0.0.1")
     copy_from_string(info.sdk_version[0 : 64], vst3.SDKVersionString)
     return vst3.Result.Ok
@@ -417,6 +540,7 @@ get_class_info_2 :: proc "c" (this: rawptr, index: i32, info: ^vst3.PClassInfo2)
 
 get_class_info_unicode :: proc "c" (this: rawptr, index: i32, info: ^vst3.PClassInfoW) -> vst3.Result {
     context = runtime.default_context()
+    mem.set(auto_cast info, 0, size_of(vst3.PClassInfoW))
     example_id := parse_uuid(ExampleUuid) or_return
     copy_slice(info.cid[0:16], example_id[0:16])
     info.cardinality = cast(i32)vst3.Cardinality.ManyInstances
@@ -441,6 +565,14 @@ Factory :: struct #packed {
 }
 
 @thread_local x: ^Factory
+
+@export ModuleEntry :: proc "c" () -> bool {
+    return true
+}
+
+@export ModuleExit :: proc "c" () -> bool {
+    return true
+}
 
 @export GetPluginFactory :: proc "c" () -> ^vst3.IPluginFactory3 {
     context = runtime.default_context()

@@ -19,7 +19,7 @@ kPrintfBufferSize :: 4096
 kNoParamId :: 0xFFFFFFFF
 kMinParamId :: 0
 kMaxParamId :: 0x7FFFFFFF
-SDKVersionString :: "VST 3.7.12"
+SDKVersionString :: "VST 3.7.9"
 SDKVersionMajor :: 3
 SDKVersionMinor :: 7
 SDKVersionSub :: 12

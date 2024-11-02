@@ -106,8 +106,8 @@ BusInfo :: struct #packed {
     direction: BusDirection,
     channel_count: i32,
     name: String128,
-    busType: BusType,
-    flags: u32,
+    bus_type: BusType,
+    flags: BusFlags,
 };
 
 RoutingInfo :: struct #packed {
