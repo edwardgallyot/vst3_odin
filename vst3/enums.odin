@@ -254,8 +254,7 @@ Cardinality :: enum i32 {
     ManyInstances = 0x7FFFFFFF
 }
 
-
-Result :: enum c.int32_t {
+Result :: enum i32 {
     NoInterface = -1,
     Ok = 0,
     True = 0,

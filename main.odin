@@ -13,10 +13,83 @@ import "core:slice"
 ExampleUuid :: "1002df00-56d3-4920-a394-1205f69854a6"
 ExampleControllerUuid :: "3981d015-fb51-43fb-9deb-03488f84c270"
 
+ExampleUrl :: "www.notgotawebsitem8.com"
+ExampleVendor :: "Noice"
+ExampleName :: "odin"
+ExampleEmail :: "edgallyot@gmail.com"
+ExampleVersion :: "0.0.1"
+ExampleCategory :: "Audio Module Class"
+
 InputChannelCount :: 2
 OutputChannelCount :: 2
 MidiInputCount :: 0
 MidiOutputCount :: 0
+
+ParameterId :: enum u32 {
+    Bypass = 0,
+    Gain = 1,
+}
+
+ParameterNames := [ParameterId] string {
+    .Bypass = "Bypass",
+    .Gain = "Gain",
+}
+
+ParameterShortNames := [ParameterId] string {
+    .Bypass = "Byps",
+    .Gain = "Gain",
+}
+
+ParameterUnits := [ParameterId] string {
+    .Bypass = "",
+    .Gain = "lin",
+}
+
+ParameterStepCounts := [ParameterId] i32 {
+    .Bypass = 1,
+    .Gain = 1024,
+}
+
+ParameterDefaults := [ParameterId] f64 {
+    .Bypass = 0.0,
+    .Gain = 1.0,
+}
+
+ParameterFlags := [ParameterId] i32 {
+    .Bypass = i32(vst3.ParameterFlags.CanAutomate) | i32(vst3.ParameterFlags.IsBypass),
+    .Gain = i32(vst3.ParameterFlags.CanAutomate)
+}
+
+to_parameter_id :: proc (v: $I) -> (ParameterId, vst3.Result) where intrinsics.type_is_integer(I) {
+    if v < 0 || v > (len(ParameterId) - 1) {
+        return {}, vst3.Result.InvalidArgument
+    }
+    return auto_cast v, nil
+}
+
+normalise_gain :: proc (v: f64) -> f64 {
+    return v
+}
+
+denormalise_gain :: proc (v: f64) -> f64 {
+    return v
+}
+
+normalise_parameter :: proc (p: ParameterId, v: f64) -> f64 {
+    switch p {
+    case .Bypass: return v
+    case .Gain: return normalise_gain(v)
+    }
+    return 0.0
+}
+
+denormalise_parameter :: proc (p: ParameterId, v: f64) -> f64 {
+    switch p {
+    case .Bypass: return v
+    case .Gain: return denormalise_gain(v)
+    }
+    return 0.0
+}
 
 channel_count_to_speaker_arrangement :: proc (channel_count: u32) -> vst3.SpeakerArrangement {
     // Do we event need to support more
@@ -182,10 +255,23 @@ controller_get_state :: proc "c" (rawptr, ^vst3.IBStream) -> vst3.Result {
 }
 
 get_parameter_count :: proc "c" (rawptr) -> i32 {
-    return 0
+    return len(ParameterId)
 }
 
-get_parameter_info :: proc "c" (rawptr, i32, ^vst3.ParameterInfo) -> vst3.Result {
+get_parameter_info :: proc "c" (this: rawptr, index: i32, info: ^vst3.ParameterInfo) -> vst3.Result {
+    context = runtime.default_context()
+    mem.set(info, 0, size_of(vst3.ParameterInfo))
+    id := to_parameter_id(index) or_return
+    info^ = {
+        id = auto_cast id,
+        step_count = ParameterStepCounts[id],
+        unit_id = vst3.UnitID.RootUnit,
+        default_normalised_value = ParameterDefaults[id],
+        flags = ParameterFlags[id]
+    }
+    utf16.encode_string(info.title[:], ParameterNames[id])
+    utf16.encode_string(info.short_title[:], ParameterShortNames[id])
+    utf16.encode_string(info.units[:], ParameterUnits[id])
     return vst3.Result.Ok
 }
 
@@ -205,7 +291,8 @@ plain_param_to_normalised :: proc "c" (rawptr, u32, f64) -> f64 {
     return 0
 }
 
-get_param_normalised :: proc "c" (rawptr, u32) -> f64 {
+get_param_normalised :: proc "c" (this: rawptr, id: u32) -> f64 {
+
     return 0
 }
 
@@ -316,8 +403,8 @@ get_bus_count :: proc "c" (this: rawptr, media_type: vst3.MediaType, bus_directi
         }
     case .Event: 
         switch bus_direction {
-        case .Input: return InputChannelCount
-        case .Output: return OutputChannelCount
+        case .Input: return MidiInputCount 
+        case .Output: return MidiOutputCount 
         }
     }
     return 0
@@ -482,9 +569,9 @@ factory_release :: proc "c" (this: rawptr) -> u32 {
 }
 
 get_factory_info :: proc "c" (this: rawptr, info: ^vst3.PFactoryInfo) ->  vst3.Result {
-    copy(info.url[0 : 256], "hello.com")
-    copy(info.email[0 : 128], "edgallyot@gmail.com")
-    copy(info.vendor[0 : 64], "Noice")
+    copy(info.url[0 : 256], ExampleUrl)
+    copy(info.email[0 : 128], ExampleEmail)
+    copy(info.vendor[0 : 64], ExampleVendor)
     info.flags = vst3.kDefaultFactoryFlags
     return vst3.Result.Ok
 }
@@ -496,10 +583,10 @@ count_classes :: proc "c" (this: rawptr) -> i32 {
 get_class_info :: proc "c" (this: rawptr, idx: i32, info: ^vst3.PClassInfo) -> vst3.Result {
     context = runtime.default_context()
     example_id := parse_uuid(ExampleUuid) or_return
-    mem.set(auto_cast info, 0, size_of(vst3.PClassInfo))
+    mem.set(info, 0, size_of(vst3.PClassInfo))
     copy_slice(info.cid[0:16], example_id[0:16])
-    copy_from_string(info.name[0 : 64], "odin")
-    copy_from_string(info.category[0 : 32], "Audio Module Class")
+    copy_from_string(info.name[0 : 64], ExampleName)
+    copy_from_string(info.category[0 : 32], ExampleCategory)
     info.cardinality = cast(i32)vst3.Cardinality.ManyInstances
     return vst3.Result.Ok
 }
@@ -512,7 +599,7 @@ create_instance :: proc "c" (this: rawptr, class_id: [^]u8, interface_id: [^]u8,
         f_unknown_id := parse_uuid (vst3.FUnknown_iid) or_return
         i_component_id := parse_uuid (vst3.IComponent_iid) or_return
 
-        if slice.equal(f_unknown_id[0 : 16], iid) || slice.equal(i_component_id[0:16], iid) {
+        if slice.equal(f_unknown_id[:], iid) || slice.equal(i_component_id[:], iid) {
             plugin := make_plugin()
             obj^ = auto_cast &plugin.component
             return vst3.Result.True
@@ -524,32 +611,32 @@ create_instance :: proc "c" (this: rawptr, class_id: [^]u8, interface_id: [^]u8,
 
 get_class_info_2 :: proc "c" (this: rawptr, index: i32, info: ^vst3.PClassInfo2) -> vst3.Result {
     context = runtime.default_context()
-    mem.set(auto_cast info, 0, size_of(vst3.PClassInfo2))
+    mem.set(info, 0, size_of(vst3.PClassInfo2))
     example_id := parse_uuid(ExampleUuid) or_return
-    copy_slice(info.cid[0:16], example_id[0:16])
+    copy_slice(info.cid[:], example_id[:])
     info.cardinality = cast(i32)vst3.Cardinality.ManyInstances
-    copy_from_string(info.category[0 : 32], "Audio Module Class")
-    copy_from_string(info.name[:], "odin")
+    copy_from_string(info.name[:], ExampleName)
+    copy_from_string(info.category[:], ExampleCategory)
     info.class_flags = cast(u32)vst3.ComponentFlags.SimpleModeSupported
-    copy_from_string(info.sub_categories[0 : 128], vst3.kInstrument)
-    copy_from_string(info.vendor[0 : 64], "Noice")
-    copy_from_string(info.version[0 : 64], "0.0.1")
-    copy_from_string(info.sdk_version[0 : 64], vst3.SDKVersionString)
+    copy_from_string(info.sub_categories[:], vst3.kInstrument)
+    copy_from_string(info.vendor[:], ExampleVendor)
+    copy_from_string(info.version[:], ExampleVersion)
+    copy_from_string(info.sdk_version[:], vst3.SDKVersionString)
     return vst3.Result.Ok
 }
 
 get_class_info_unicode :: proc "c" (this: rawptr, index: i32, info: ^vst3.PClassInfoW) -> vst3.Result {
     context = runtime.default_context()
-    mem.set(auto_cast info, 0, size_of(vst3.PClassInfoW))
+    mem.set(info, 0, size_of(vst3.PClassInfoW))
     example_id := parse_uuid(ExampleUuid) or_return
-    copy_slice(info.cid[0:16], example_id[0:16])
+    copy_slice(info.cid[:], example_id[:])
     info.cardinality = cast(i32)vst3.Cardinality.ManyInstances
-    copy_from_string(info.category[:], "Audio Module Class")
-    utf16.encode_string(info.name[:], "odin")
+    utf16.encode_string(info.name[:], ExampleName)
+    copy_from_string(info.category[:], ExampleCategory)
     info.class_flags = cast(u32)vst3.ComponentFlags.SimpleModeSupported
     copy_from_string(info.sub_categories[:], vst3.kInstrument)
-    utf16.encode_string(info.vendor[:], "Noice")
-    utf16.encode_string(info.version[:], "0.0.1")
+    utf16.encode_string(info.vendor[:], ExampleVendor) 
+    utf16.encode_string(info.version[:], ExampleVersion)
     utf16.encode_string(info.sdk_version[:], vst3.SDKVersionString)
     return vst3.Result.Ok
 }

@@ -122,8 +122,8 @@ ParameterInfo :: struct #packed {
     short_title: String128,
     units: String128,
     step_count: i32,
-    default_normalized_value: f64,
-    unitId: UnitID,
+    default_normalised_value: f64,
+    unit_id: UnitID,
     flags: i32,
 }
 
@@ -278,8 +278,8 @@ ProcessData :: struct #packed {
     num_outputs: i32,
     inputs: ^AudioBusBuffers,
     outputs: ^AudioBusBuffers,
-    // struct Steinberg_Vst_IParameterChanges* inputParameterChanges;
-    // struct Steinberg_Vst_IParameterChanges* outputParameterChanges;
+    inputParameterChanges:  ^IParameterChanges,
+    outputParameterChanges: ^IParameterChanges,
     input_events: ^IEventList,
     output_events: ^IEventList,
     process_context: ^ProcessContext,
