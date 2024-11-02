@@ -67,7 +67,7 @@ Speaker :: enum u64 {
     Rw     = 1 << 60,
 }
 
-SpeakerArrangements :: enum u64 {
+SpeakerArrangement :: enum u64 {
     Empty = 0,
     MonoSpeaker = 1 << 19,
     StereoSpeaker = 1 << 0 | 1 << 1,
@@ -466,7 +466,7 @@ ChannelPluginLocation :: enum {
     UsedAsPanner
 } 
 
-PrefetchableSupport :: enum {
+PrefetchableSupport :: enum u32 {
     IsNeverPrefetchable = 0,
     IsYetPrefetchable,
     IsNotYetPrefetchable,

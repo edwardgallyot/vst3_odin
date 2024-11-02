@@ -1,7 +1,7 @@
 package vst3
 
 FUnknownVtbl :: struct #packed {
-    query_interface: proc "c" (rawptr, cstring, ^rawptr) -> Result,
+    query_interface: proc "c" (rawptr, [^]u8, ^rawptr) -> Result,
     add_ref: proc "c" (rawptr) -> u32,
     release: proc "c" (rawptr) -> u32,
 }
@@ -123,7 +123,6 @@ INoteExpressionPhysicalUIMapping_iid :: "b03078ff-94d2-4ac8-90cc-d303d4133324"
 
 IPluginBaseVtbl :: struct #packed {
     using unknown: FUnknownVtbl,
-
     initialize: proc "c" (rawptr, ^FUnknown) -> Result,
     terminate: proc "c" (rawptr) -> Result,
 } 
@@ -139,7 +138,7 @@ IPluginFactoryVtbl :: struct #packed {
     get_factory_info: proc "c" (rawptr, ^PFactoryInfo) ->  Result,
     count_classes: proc "c" (rawptr) -> i32,
     get_class_info: proc "c" (rawptr, i32, ^PClassInfo) -> Result,
-    create_instance: proc "c" (rawptr, cstring, cstring, ^rawptr) -> Result,
+    create_instance: proc "c" (rawptr, [^]u8, [^]u8, ^rawptr) -> Result,
 } 
 
 IPluginFactory :: struct #packed {
@@ -384,3 +383,404 @@ IMessage :: struct #packed {
 
 IMessage_iid :: "936f033b-c6c0-47db-bb08-82f813c1e613"
 
+IConnectionPointVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    connect: proc "c" (rawptr, ^IConnectionPoint) -> Result,
+    disconnect: proc "c" (rawptr, ^IConnectionPoint) -> Result,
+    notify: proc "c" (rawptr, ^IMessage) -> Result,
+}
+
+IConnectionPoint :: struct #packed {
+    using vtbl: ^IConnectionPoint,
+}
+
+IConnectionPoint_iid :: "70a4156f-6e6e-4026-9891-48bfaa60d8d1"
+
+
+IXmlRepresentationControllerVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    get_xml_representation_stream: proc "c" (rawptr, ^RepresentationInfo, ^IBStream) -> Result,
+}
+
+IXmlRepresentationController :: struct #packed {
+    using vtbl: IXmlRepresentationControllerVtbl,
+}
+
+IXmlRepresentationController_iid :: "a81a0471-48c3-4dc4-ac30-c9e13c8393d5"
+
+
+IComponentHandler3Vtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    create_context_menu: proc "c" (rawptr, ^IPlugView, ^u32) -> ^IContextMenu,
+}
+
+IComponentHandler3 :: struct #packed {
+    using vtbl: ^IComponentHandler3Vtbl,
+}
+
+IComponentHandler3_iid :: "69f11617-d26b-400d-a4b6-b9647b6ebbab"
+
+
+IContextMenuTargetVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    execute_menu_item: proc "c" (rawptr, i32) -> Result,
+}
+
+IContextMenuTarget :: struct #packed {
+    using vtbl: ^IContextMenuTargetVtbl,
+}
+
+IContextMenuTarget_iid :: "3cdf2e75-85d3-4144-bf86-d36bd7c4894d"
+
+IContextMenuVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    get_item_count: proc "c" (rawptr) -> i32,
+    get_item: proc "c" (rawptr, i32, ^IContextMenuItem, ^^IContextMenuTarget) -> Result,
+    remove_item: proc "c" (rawptr, ^IContextMenuItem, ^IContextMenuTarget) -> Result,
+    popup: proc "c" (rawptr, i32, i32) -> Result,
+}
+
+IContextMenu :: struct #packed {
+    using vtbl: ^IContextMenuVtbl,
+}
+
+IContextMenu_iid :: "2e93c863-0c9c-4588-97db-ecf5ad17817d"
+
+IMidiLearnVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    on_live_midi_controller_input: proc "c" (rawptr, i32, i16, ControllerNumber) -> Result,
+}
+
+IMidiLearn :: struct #packed {
+    using vtbl: ^IMidiLearnVtbl,
+}
+
+IMidiLearn_iid :: "6b2449cc-4197-40b5-ab3c-79dac5fe5c86"
+
+IInfoListenerVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    set_channel_context_infos: proc "c" (rawptr, ^IAttributeList) -> Result,
+}
+
+IInfoListener :: struct #packed {
+    using vtbl: ^IInfoListenerVtbl,
+}
+
+IInfoListener_iid :: "0f194781-8d98-4ada-bba0-c1efc011d8d0"
+
+IPrefetchableSupportVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    get_prefetchable_support: proc "c" (rawptr, PrefetchableSupport) -> Result,
+}
+
+IPrefetchableSupport :: struct #packed {
+    using vtbl: ^IPrefetchableSupportVtbl,
+}
+
+IPrefetchableSupport_iid :: "8ae54fda-e930-46b9-a285-55bcdc98e21e"
+
+IDataExchangeHandlerVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    open_queue: proc "c" (rawptr, ^IAudioProcessor, u32, u32, u32, u32, ^u32) -> Result,
+    close_queue: proc "c" (rawptr, u32) -> Result,
+    lock_block: proc "c" (rawptr, u32, ^DataExchangeBlock) -> Result,
+    free_block: proc "c" (rawptr, u32, u32, u8) -> Result,
+} 
+
+IDataExchangeHandler :: struct #packed {
+    using vtbl: ^IDataExchangeHandlerVtbl,
+}
+
+IDataExchangeHandler_iid :: "36d551bd-6ff5-4f08-b48e-830d8bd5a03b"
+
+IDataExchangeReceiverVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    queue_opened: proc "c" (rawptr, u32, u32, ^u8),
+    queue_closed: proc "c" (rawptr, u32),
+    on_data_exchange_blocks_received: proc "c" (rawptr, u32, u32, ^DataExchangeBlock, u8),
+}
+
+IDataExchangeReceiver :: struct #packed {
+    using vtbl: ^IDataExchangeReceiverVtbl
+}
+
+IDataExchangeReceiver_iid :: "45a759dc-84fa-4907-abcb-61752fc786b6"
+
+IAutomationStateVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    set_automation_state: proc "c" (rawptr, i32) -> Result,
+}
+
+IAutomationState :: struct #packed {
+    using vtbl: ^IAutomationStateVtbl,
+}
+
+IAutomationState_iid :: "b4e8287f-1bb3-46aa-83a4-666768937bab"
+
+IInterAppAudioHostVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    get_screen_size: proc "c" (rawptr, ^ViewRect, ^f32) -> Result,
+    connected_to_host: proc "c" (rawptr) -> Result,
+    switch_to_host: proc "c" (rawptr) -> Result,
+    send_remote_control_event: proc "c" (rawptr, u32) -> Result,
+    get_host_icon: proc "c" (rawptr, ^rawptr) -> Result,
+    schedule_event_from_ui: proc "c" (rawptr, ^Event) -> Result,
+    create_preset_manager: proc "c" (rawptr, ^TUID) -> ^IInterAppAudioPresetManager,
+    show_settings_view: proc "c" (rawptr) -> Result,
+}
+
+IInterAppAudioHost :: struct #packed {
+    using vtbl: ^IInterAppAudioHostVtbl,
+}
+
+IInterAppAudioHost_iid :: "0ce5743d-68df-415e-ae28-5bd4e2cdc8fd"
+
+IInterAppAudioConnectionNotificationVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    on_inter_app_audio_connection_state_change: proc "c" (rawptr, u8),
+}
+
+IInterAppAudioConnectionNotification :: struct #packed {
+    using vtbl: ^IInterAppAudioConnectionNotificationVtbl,
+}
+
+IInterAppAudioConnectionNotification_iid :: "6020c72d-5fc2-4aa1-b095-0db5d7d6d5cf"
+
+IInterAppAudioPresetManagerVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    run_load_preset_browser: proc "c" (rawptr) -> Result,
+    run_save_preset_browser: proc "c" (rawptr) -> Result,
+    load_next_preset: proc "c" (rawptr) -> Result,
+    load_previous_preset: proc "c" (rawptr) -> Result,
+}
+
+IInterAppAudioPresetManager :: struct #packed {
+    using vtbl: ^IInterAppAudioPresetManagerVtbl,
+}
+
+IInterAppAudioPresetManager_iid :: "ade6fcc4-46c9-4e1d-b3b4-9a80c93fefdd"
+
+IAudioProcessorVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    set_bus_arrangements: proc "c" (rawptr, ^SpeakerArrangement, i32, ^SpeakerArrangement, i32) -> Result,
+    get_bus_arrangements: proc "c" (rawptr, BusDirection, i32, ^SpeakerArrangement, i32) -> Result,
+    can_process_sample_size: proc "c" (rawptr, SymbolicSampleSize) -> Result,
+    get_latency_samples: proc "c" (rawptr) -> Result,
+    setup_processing: proc "c" (rawptr, ^ProcessSetup) -> Result,
+    set_processing: proc "c" (rawptr, u8) -> Result,
+    process: proc "c" (rawptr, ^ProcessData) -> Result,
+    get_tail_samples: proc "c" (rawptr) -> u32,
+}
+
+IAudioProcessor :: struct #packed {
+    using vtbl: ^IAudioProcessorVtbl, 
+}
+
+IAudioProcessor_iid :: "42043f99-b7da-453c-a569-e79d9aaec33d"
+
+IAudioPresentationLatencyVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    set_audio_presentation_latency_samples: proc "c" (rawptr, BusDirection, i32, u32) -> Result,
+}
+
+IAudioPresentationLatency :: struct #packed {
+    using vtbl: ^IAudioPresentationLatencyVtbl,
+}
+
+IAudioPresentationLatency_iid :: "309ece78-eb7d-4fae-8b22-25d909fd08b6"
+
+IProcessContextRequirementsVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    get_process_context_requirements: proc "c" (rawptr) -> u32,
+}
+
+IProcessContextRequirements :: struct #packed {
+    using vtbl: ^IProcessContextRequirementsVtbl,
+}
+
+IProcessContextRequirements_iid :: "2a654303-ef76-4e3d-95b5-fe83730ef6d0"
+
+IHostApplicationVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    get_name: proc "c" (rawptr, String128) -> Result,
+    create_instance: proc "c" (rawptr, TUID, TUID, ^rawptr) -> Result,
+}
+
+IHostApplication :: struct #packed {
+    using vtbl: IHostApplicationVtbl,
+}
+
+IHostApplication_iid :: "58e595cc-db2d-4969-8b6a-af8c36a664e5"
+
+IVst3ToVst2WrapperVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+}
+
+IVst3ToVst2Wrapper :: struct #packed {
+    vtbl: ^IVst3ToVst2WrapperVtbl,
+}
+
+IVst3ToVst2Wrapper_iid :: "29633aec-1d1c-47e2-bb85-b97bd36eac61"
+
+IVst3ToAUWrapperVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+}
+
+IVst3ToAUWrapper :: struct #packed {
+    using vtbl: ^IVst3ToAUWrapperVtbl,
+}
+
+IVst3ToAUWrapper_iid :: "a3b8c6c5-c095-4688-b091-6f0bb697aa44"
+
+IVst3ToAAXWrapperVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+}
+
+IVst3ToAAXWrapper :: struct #packed {
+    using vtbl: ^IVst3ToAAXWrapper,
+}
+
+IVst3ToAAXWrapper_iid :: "6d319dc6-60c5-6242-b32c-951b93bef4c6"
+
+IVst3WrapperMPESupportVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    enable_mpe_input_processing: proc "c" (rawptr, u8) -> Result,
+    set_mpe_input_device_settings: proc "c" (rawptr, i32, i32, i32) -> Result,
+}
+
+IVst3WrapperMPESupport :: struct #packed {
+    using vtbl: ^IVst3WrapperMPESupportVtbl,
+}
+
+IVst3WrapperMPESupport_iid :: "44149067-42cf-4bf9-8800-b750f7359fe3"
+
+IParameterFinderVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    find_parameter: proc "c" (rawptr, i32, i32, ^u32) -> Result,
+}
+
+IParameterFinder :: struct #packed {
+    vtbl: ^IParameterFinderVtbl,
+}
+
+IParameterFinder_iid :: "0f618302-215d-4587-a512-073c77b9d383"
+
+IUnitHandlerVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    notify_unit_selection: proc "c" (rawptr, u32) -> Result,
+    notify_program_list_change: proc "c" (rawptr, u32, i32) -> Result,
+}
+
+IUnitHandler :: struct #packed {
+    using vtbl: ^IUnitHandlerVtbl,
+}
+
+IUnitHandler_iid :: "4b5147f8-4654-486b-8dab-30ba163a3c56"
+
+IUnitHandler2Vtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    notify_unit_by_bus_change: proc "c" (rawptr) -> Result,
+}
+
+IUnitHandler2 :: struct #packed {
+    using vtbl: IUnitHandler2Vtbl,
+}
+
+IUnitHandler2_iid :: "f89f8cdf-699e-4ba5-96aa-c9a481452b01"
+
+IUnitInfoVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    get_unit_count: proc "c" (rawptr) -> i32,
+    get_unit_info: proc "c" (rawptr, i32, ^UnitInfo) -> Result,
+    get_program_list_count: proc "c" (rawptr) -> i32,
+    get_program_list_info: proc "c" (rawptr, i32, ^ProgramListInfo) -> Result,
+    get_program_name: proc "c" (rawptr, i32, i32, String128) -> Result,
+    get_program_info: proc "c" (rawptr, i32, i32, ^u16, String128) -> Result,
+    has_program_pitch_names: proc "c" (rawptr, i32, i32) -> Result,
+    get_program_pitch_names: proc "c" (rawptr, i32, i32, i16, String128) -> Result,
+    get_selected_unit: proc "c" (rawptr) -> i32,
+    select_unit: proc "c" (rawptr, i32) -> Result,
+    get_unit_by_bus: proc "c" (rawptr, MediaType, BusDirection, i32, i32, ^i32) -> Result,
+    set_unit_program_data: proc "c" (rawptr, i32, i32, ^IBStream) -> Result,
+}
+
+IUnitInfo :: struct #packed {
+    using vtbl: ^IUnitInfoVtbl,
+}
+
+IUnitInfo_iid :: "3d4bd6b5-913a-4fd2-a886-e768a5eb92c1"
+
+IProgramListDataVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    program_data_supported: proc "c" (rawptr, i32) -> Result,
+    get_program_data: proc "c" (rawptr, i32, i32, ^IBStream) -> Result,
+    set_program_data: proc "c" (rawptr, i32, i32, ^IBStream) -> Result,
+}
+
+IProgramListData :: struct #packed {
+    using vtbl: ^IProgramListDataVtbl,
+}
+
+IProgramListData_iid :: "8683b01f-7b35-4f70-a265-1dec353af4ff"
+
+IUnitDataVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    unit_data_supported: proc "c" (rawptr, i32) -> Result,
+    get_unit_data: proc "c" (rawptr, i32, ^IBStream) -> Result,
+    set_unit_data: proc "c" (rawptr, i32, ^IBStream) -> Result,
+}
+
+IUnitData :: struct #packed {
+    using vtbl: ^IUnitInfoVtbl,
+}
+
+IUnitData_iid :: "6c389611-d391-455d-b870-b83394a0efdd"
+
+IPlugInterfaceSupportVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    is_plug_interface_supported: proc "c" (rawptr, TUID) -> Result,
+}
+
+IPlugInterfaceSupport :: struct #packed {
+    using vtbl: ^IPlugInterfaceSupportVtbl,
+}
+
+IPlugInterfaceSupport_iid :: "4fb58b9e-9eaa-4e0f-ab36-1c1cccb56fea"
+
+IParameterFunctionNameVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    get_parameter_id_from_function_name: proc "c" (rawptr, i32, cstring, ^u32) -> Result,
+}
+
+Vst_IParameterFunctionName :: struct #packed {
+    using vtbl: ^IParameterFunctionNameVtbl,
+}
+
+IParameterFunctionName_iid :: "6d21e1dc-9119-9d4b-a2a0-2fef6c1ae55c"
+
+IParamValueQueueVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    get_parameter_id: proc "c" (rawptr) -> u32,
+    get_point_count: proc "c" (rawptr) -> i32,
+    get_point: proc "c" (rawptr, i32, ^i32, ^f64) -> Result,
+    add_point: proc "c" (rawptr, i32, f64, ^i32) -> Result,
+}
+
+IParamValueQueue :: struct #packed {
+    using vtbl: ^IParamValueQueueVtbl,
+}
+
+IParamValueQueue_iid :: "01263a18-ed07-4f6f-98c9-d3564686f9ba"
+
+IParameterChangesVtbl :: struct #packed {
+    using unknown: FUnknownVtbl,
+    get_parameter_count: proc "c" (rawptr) -> i32,
+    get_parameter_data: proc "c" (rawptr, i32) -> ^IParamValueQueue,
+    add_parameter_data: proc "c" (rawptr, ^f64, ^i32) -> ^IParamValueQueue,
+}
+
+IParameterChanges :: struct #packed {
+    using vtbl: ^IParameterChangesVtbl,
+}
+
+IParameterChanges_iid :: "a4779663-0bb6-4a56-b443-84a8466feb9d"
