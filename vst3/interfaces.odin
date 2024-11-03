@@ -87,7 +87,7 @@ INoteExpressionControllerVtbl :: struct #packed {
     using unknown: FUnknownVtbl,
     get_note_expression_count: proc "c" (rawptr, i32, i16) -> i32,
     get_note_expression_info: proc "c" (rawptr, i32, i16, i32, ^NoteExpressionTypeInfo) -> Result,
-    get_note_expression_string_by_value: proc "c" (rawptr, i32, i16, NoteExpressionTypeID, ^NoteExpressionTypeInfo, f64, String128) -> Result,
+    get_note_expression_string_by_value: proc "c" (rawptr, i32, i16, NoteExpressionTypeID, ^NoteExpressionTypeInfo, f64, [^]u16) -> Result,
     get_note_expression_value_by_string: proc "c" (rawptr, i32, i16, NoteExpressionTypeID, ^u16, f64) -> Result,
 }
 
@@ -209,7 +209,7 @@ IAttributeList_iid :: "1e5f0aeb-cc7f-4533-a254-401138ad5ee4"
 
 IStreamAttributesVtbl :: struct #packed {
     using unknown: FUnknownVtbl,
-    get_file_name: proc "c" (rawptr, String128) -> Result,
+    get_file_name: proc "c" (rawptr, [^]u16) -> Result,
     get_attributes: proc "c" (rawptr) -> ^IAttributeList,
 }
 
@@ -222,7 +222,7 @@ IStreamAttributes_iid :: "d6ce2ffc-efaf-4b8c-9e74-f1bb12da44b4"
 
 IRemapParamIDVtbl :: struct #packed {
     using unknown: FUnknownVtbl,
-    get_compatible_param_id: proc "c" (rawptr, TUID, u32, ^u32) -> Result,
+    get_compatible_param_id: proc "c" (rawptr, [^]u8, u32, ^u32) -> Result,
 }
 
 IRemapParamID :: struct #packed {
@@ -291,7 +291,7 @@ IEditControllerVtbl :: struct #packed {
     get_state: proc "c" (rawptr, ^IBStream) -> Result,
     get_parameter_count: proc "c" (rawptr) -> i32,
     get_parameter_info: proc "c" (rawptr, i32, ^ParameterInfo) -> Result,
-    get_parameter_string_by_value: proc "c" (rawptr, u32, f64, String128) -> Result,
+    get_parameter_string_by_value: proc "c" (rawptr, u32, f64, [^]u16) -> Result,
     get_parameter_value_by_string: proc "c" (rawptr, u32, cstring, ^f64) -> Result,
     normalised_param_to_plain: proc "c" (rawptr, u32, f64) -> f64,
     plain_param_to_normalised: proc "c" (rawptr, u32, f64) -> f64,
@@ -525,7 +525,7 @@ IInterAppAudioHostVtbl :: struct #packed {
     send_remote_control_event: proc "c" (rawptr, u32) -> Result,
     get_host_icon: proc "c" (rawptr, ^rawptr) -> Result,
     schedule_event_from_ui: proc "c" (rawptr, ^Event) -> Result,
-    create_preset_manager: proc "c" (rawptr, ^TUID) -> ^IInterAppAudioPresetManager,
+    create_preset_manager: proc "c" (rawptr, ^[^]u8) -> ^IInterAppAudioPresetManager,
     show_settings_view: proc "c" (rawptr) -> Result,
 }
 
@@ -602,8 +602,8 @@ IProcessContextRequirements_iid :: "2a654303-ef76-4e3d-95b5-fe83730ef6d0"
 
 IHostApplicationVtbl :: struct #packed {
     using unknown: FUnknownVtbl,
-    get_name: proc "c" (rawptr, String128) -> Result,
-    create_instance: proc "c" (rawptr, TUID, TUID, ^rawptr) -> Result,
+    get_name: proc "c" (rawptr, [^]u16) -> Result,
+    create_instance: proc "c" (rawptr, [^]u8, [^]u8, ^rawptr) -> Result,
 }
 
 IHostApplication :: struct #packed {
@@ -694,10 +694,10 @@ IUnitInfoVtbl :: struct #packed {
     get_unit_info: proc "c" (rawptr, i32, ^UnitInfo) -> Result,
     get_program_list_count: proc "c" (rawptr) -> i32,
     get_program_list_info: proc "c" (rawptr, i32, ^ProgramListInfo) -> Result,
-    get_program_name: proc "c" (rawptr, i32, i32, String128) -> Result,
-    get_program_info: proc "c" (rawptr, i32, i32, ^u16, String128) -> Result,
+    get_program_name: proc "c" (rawptr, i32, i32, [^]u16) -> Result,
+    get_program_info: proc "c" (rawptr, i32, i32, ^u16, [^]u16) -> Result,
     has_program_pitch_names: proc "c" (rawptr, i32, i32) -> Result,
-    get_program_pitch_names: proc "c" (rawptr, i32, i32, i16, String128) -> Result,
+    get_program_pitch_names: proc "c" (rawptr, i32, i32, i16, [^]u16) -> Result,
     get_selected_unit: proc "c" (rawptr) -> i32,
     select_unit: proc "c" (rawptr, i32) -> Result,
     get_unit_by_bus: proc "c" (rawptr, MediaType, BusDirection, i32, i32, ^i32) -> Result,
@@ -738,7 +738,7 @@ IUnitData_iid :: "6c389611-d391-455d-b870-b83394a0efdd"
 
 IPlugInterfaceSupportVtbl :: struct #packed {
     using unknown: FUnknownVtbl,
-    is_plug_interface_supported: proc "c" (rawptr, TUID) -> Result,
+    is_plug_interface_supported: proc "c" (rawptr, [^]u8) -> Result,
 }
 
 IPlugInterfaceSupport :: struct #packed {

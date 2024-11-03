@@ -1,14 +1,21 @@
 package main 
 
-import "core:mem"
-import "base:runtime"
-import "core:os"
 import "vst3"
+
 import "base:intrinsics"
+import "base:runtime"
+
 import "core:encoding/uuid"
+import "core:fmt"
+import "core:math"
+import "core:mem"
+import "core:os"
+import "core:slice"
+import "core:strconv"
 import "core:strings"
 import "core:unicode/utf16"
-import "core:slice"
+
+// Example user data:
 
 ExampleUuid :: "1002df00-56d3-4920-a394-1205f69854a6"
 ExampleControllerUuid :: "3981d015-fb51-43fb-9deb-03488f84c270"
@@ -42,7 +49,7 @@ ParameterShortNames := [ParameterId] string {
 
 ParameterUnits := [ParameterId] string {
     .Bypass = "",
-    .Gain = "lin",
+    .Gain = "dB",
 }
 
 ParameterStepCounts := [ParameterId] i32 {
@@ -60,6 +67,12 @@ ParameterFlags := [ParameterId] i32 {
     .Gain = i32(vst3.ParameterFlags.CanAutomate)
 }
 
+State :: struct {
+    param_values: [ParameterId]f64,
+    sine_phase: f32,
+    processing: bool,
+}
+
 to_parameter_id :: proc (v: $I) -> (ParameterId, vst3.Result) where intrinsics.type_is_integer(I) {
     if v < 0 || v > (len(ParameterId) - 1) {
         return {}, vst3.Result.InvalidArgument
@@ -68,11 +81,15 @@ to_parameter_id :: proc (v: $I) -> (ParameterId, vst3.Result) where intrinsics.t
 }
 
 normalise_gain :: proc (v: f64) -> f64 {
-    return v
+    return math.pow(10, v) / 20
 }
 
 denormalise_gain :: proc (v: f64) -> f64 {
-    return v
+    if v == 0 {
+        return 0
+    } else {
+        return 20 * math.log10(v)
+    }
 }
 
 normalise_parameter :: proc (p: ParameterId, v: f64) -> f64 {
@@ -91,6 +108,50 @@ denormalise_parameter :: proc (p: ParameterId, v: f64) -> f64 {
     return 0.0
 }
 
+parameter_string_by_normalised_value :: proc (p: ParameterId, buffer: []byte, normalised: f64) -> string {
+    v := denormalise_parameter(p, normalised)
+    switch p {
+    case .Bypass: 
+        if v > 0.5 {
+            return "On"
+        } else {
+            return "Off"
+        }
+    case .Gain: 
+        if normalised >= 1 {
+            return "0.0"
+        }
+        if normalised <= 0 {
+            return "-inf"
+        }
+        result := strconv.append_float(buffer[:], v, 'f', 2, 64)
+        result = strings.trim (result, "+")
+        return result
+    }
+    return {}
+}
+
+parameter_denormalised_value_by_string :: proc (p: ParameterId, s: string) -> (f64, vst3.Result) {
+    switch p {
+    case .Bypass:
+        if s == "On" {
+            return 1, nil
+        } else if s == "Off" {
+            return 0, nil
+        } else {
+            return 0, vst3.Result.InvalidArgument
+        }
+    case .Gain: 
+         res, err := strconv.parse_f64(s)
+         if err {
+             return 0.0, vst3.Result.InvalidArgument 
+         } else {
+            return res, nil
+         }
+    }
+    return {}, vst3.Result.InvalidArgument
+}
+
 channel_count_to_speaker_arrangement :: proc (channel_count: u32) -> vst3.SpeakerArrangement {
     // Do we event need to support more
     if channel_count == 1 {
@@ -102,9 +163,10 @@ channel_count_to_speaker_arrangement :: proc (channel_count: u32) -> vst3.Speake
     return vst3.SpeakerArrangement.Empty
 }
 
+// COM implmentation
+
 processor_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
     context = runtime.default_context()
-
     f_unknown_id := parse_uuid (vst3.FUnknown_iid) or_return
     i_processor_id := parse_uuid (vst3.IAudioProcessor_iid) or_return
     if slice.equal(id[0:16], i_processor_id[0:16]) ||
@@ -175,11 +237,30 @@ setup_processing :: proc "c" (rawptr, ^vst3.ProcessSetup) -> vst3.Result {
     return vst3.Result.Ok
 }
 
-set_processing :: proc "c" (rawptr, u8) -> vst3.Result {
+set_processing :: proc "c" (this: rawptr, state: u8) -> vst3.Result {
+    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    plugin.state.processing = auto_cast state 
     return vst3.Result.Ok
 }
 
-process :: proc "c" (rawptr, ^vst3.ProcessData) -> vst3.Result {
+process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result {
+    #no_bounds_check {
+        context = runtime.default_context()
+        num_samples := data.num_samples
+        num_inputs := data.num_inputs
+        num_outputs := data.num_outputs
+        bus_outputs := data.outputs[:num_outputs]
+        for bus in bus_outputs {
+            num_channels := bus.num_channels
+            channels := bus.buffers_32[:num_channels]
+            for channel in channels {
+                samples := channel[:num_samples]
+                for &sample in samples {
+                    sample = 0
+                }
+            }
+        }
+    }
     return vst3.Result.Ok
 }
 
@@ -210,7 +291,6 @@ Processor :: struct #packed  {
 
 controller_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
     context = runtime.default_context()
-
     f_unknown_id := parse_uuid (vst3.FUnknown_iid) or_return
     i_controller_id := parse_uuid (vst3.IEditController_iid) or_return
     if slice.equal(id[0:16], i_controller_id[0:16]) ||
@@ -218,7 +298,6 @@ controller_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -
         obj^ = this
         return vst3.Result.True
     }
-
     return vst3.Result.NoInterface
 }
 
@@ -275,28 +354,53 @@ get_parameter_info :: proc "c" (this: rawptr, index: i32, info: ^vst3.ParameterI
     return vst3.Result.Ok
 }
 
-get_parameter_string_by_value :: proc "c" (rawptr, u32, f64, vst3.String128) -> vst3.Result {
+get_parameter_string_by_value :: proc "c" (this: rawptr, id: u32, value: f64, string_out: [^]u16) -> vst3.Result {
+    context = runtime.default_context()
+    p := to_parameter_id(id) or_return 
+    buffer: [128]byte
+    result := parameter_string_by_normalised_value(p, buffer[:], value)
+    mem.set(string_out, 0, 128)
+    utf16.encode_string(string_out[0:len(result)], result)
     return vst3.Result.Ok
 }
 
-get_parameter_value_by_string :: proc "c" (rawptr, u32, cstring, ^f64) -> vst3.Result {
+get_parameter_value_by_string :: proc "c" (this: rawptr, id: u32, value_string: cstring, value_out: ^f64) -> vst3.Result {
+    context = runtime.default_context()
+    p := to_parameter_id(id) or_return 
+    input := string(value_string)
+    res := parameter_denormalised_value_by_string(p, input) or_return
+    value_out^ = normalise_parameter(p, res)
     return vst3.Result.Ok
 }
 
-normalised_param_to_plain :: proc "c" (rawptr, u32, f64) -> f64 {
-    return 0
+normalised_param_to_plain :: proc "c" (this: rawptr, id: u32, value: f64) -> f64 {
+    context = runtime.default_context()
+    p, err := to_parameter_id(id)
+    if err != nil { return 0 }
+    return denormalise_parameter(p, value)
 }
 
-plain_param_to_normalised :: proc "c" (rawptr, u32, f64) -> f64 {
-    return 0
+plain_param_to_normalised :: proc "c" (this: rawptr, id: u32, value: f64) -> f64 {
+    context = runtime.default_context()
+    p, err := to_parameter_id(id)
+    if err != nil { return 0 }
+    return normalise_parameter(p, value)
 }
 
 get_param_normalised :: proc "c" (this: rawptr, id: u32) -> f64 {
-
-    return 0
+    context = runtime.default_context()
+    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    p, err := to_parameter_id(id)
+    if err != nil { return 0 }
+    return normalise_parameter(p, plugin.state.param_values[p])
 }
 
-set_param_normalised :: proc "c" (rawptr, u32, f64) -> vst3.Result {
+set_param_normalised :: proc "c" (this: rawptr, id: u32, value: f64) -> vst3.Result {
+    context = runtime.default_context()
+    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    p := to_parameter_id(id) or_return
+    v := denormalise_parameter(p, value)
+    plugin.state.param_values[p] = denormalise_parameter(p, v)
     return vst3.Result.Ok
 }
 
@@ -355,19 +459,19 @@ component_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) ->
     i_component_id := parse_uuid (vst3.IComponent_iid) or_return
     if slice.equal(id[0:16], i_component_id[0:16]) ||
        slice.equal(id[0:16], f_unknown_id[0:16]) {
-        obj^ = auto_cast &plugin.component
+        obj^ = &plugin.component
         return vst3.Result.True
     }
 
     i_edit_controller_id := parse_uuid (vst3.IEditController_iid) or_return
     if slice.equal(id[0:16], i_edit_controller_id[0:16]) {
-        obj^ = auto_cast &plugin.controller
+        obj^ = &plugin.controller
         return vst3.Result.True
     }
 
     i_audio_processor_id := parse_uuid (vst3.IAudioProcessor_iid) or_return
     if slice.equal(id[0:16], i_audio_processor_id[0:16]) {
-        obj^ = auto_cast &plugin.processor
+        obj^ = &plugin.processor
         return vst3.Result.True
     }
 
@@ -520,6 +624,7 @@ make_plugin :: proc () -> ^Plugin {
     init_controller(ctrl)
     processor := &p.processor
     init_processor (processor)
+    p.state.param_values = ParameterDefaults
     return p
 }
 
@@ -527,6 +632,7 @@ Plugin :: struct #packed {
     component: Component,
     controller: Controller,
     processor: Processor,
+    state: State,
 }
 
 parse_uuid :: proc (id: string) -> (uuid.Identifier, vst3.Result) {
@@ -595,11 +701,10 @@ create_instance :: proc "c" (this: rawptr, class_id: [^]u8, interface_id: [^]u8,
     context = runtime.default_context()
     example_id := parse_uuid(ExampleUuid) or_return
     if slice.equal(example_id[0:16], class_id[0:16]) {
-        iid := interface_id[0:16]
         f_unknown_id := parse_uuid (vst3.FUnknown_iid) or_return
         i_component_id := parse_uuid (vst3.IComponent_iid) or_return
 
-        if slice.equal(f_unknown_id[:], iid) || slice.equal(i_component_id[:], iid) {
+        if slice.equal(f_unknown_id[:], interface_id[0:16]) || slice.equal(i_component_id[:], interface_id[0:16]) {
             plugin := make_plugin()
             obj^ = auto_cast &plugin.component
             return vst3.Result.True

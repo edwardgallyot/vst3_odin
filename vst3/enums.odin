@@ -292,7 +292,7 @@ IoMode :: enum i32 {
     OfflineProcessing
 }
 
-ParameterFlags :: enum {
+ParameterFlags :: enum i32 {
     NoFlags = 0,
     CanAutomate = 1 << 0,
     IsReadOnly = 1 << 1,

@@ -2,38 +2,38 @@ package vst3
 
 import "core:c"
 
-ViewRect :: struct #packed {
+ViewRect :: struct {
     left: i32,
     top: i32,
     right: i32,
     bottom: i32,
 }
 
-NoteExpressionValueDescription :: struct #packed {
+NoteExpressionValueDescription :: struct {
     default_value: f64,
     minimum: f64,
     maximum: f64,
     step_count: i32,
 }
 
-NoteExpressionValueEvent :: struct #packed {
+NoteExpressionValueEvent :: struct {
     type_id: NoteExpressionTypeID,
     note_id: i32,
     value: f64,
 }
 
-NoteExpressionTextEvent :: struct #packed {
+NoteExpressionTextEvent :: struct {
     type_id: NoteExpressionTypeID,
     note_id: i32,
     text_len: u32,
     text: ^u16,
 }
 
-NoteExpressionTypeInfo :: struct #packed {
+NoteExpressionTypeInfo :: struct {
     type_id: NoteExpressionTypeID,
-    title: String128,
-    short_title: String128,
-    units: String128,
+    title: [128]u16,
+    short_title: [128]u16,
+    units: [128]u16,
     unit_id: i32,
     value_desc: NoteExpressionValueDescription,
     associated_parameter_id: u32,
@@ -43,8 +43,8 @@ NoteExpressionTypeInfo :: struct #packed {
 KeyswitchInfo :: struct #packed
 {
     type_id: KeyswitchTypeID,
-    title: String128,
-    short_title: String128,
+    title: [128]u16,
+    short_title: [128]u16,
     keyswitch_min: i32,
     keyswitch_max: i32,
     key_remapped: i32,
@@ -52,17 +52,17 @@ KeyswitchInfo :: struct #packed
     flags: i32,
 }
 
-PhysicalUIMap :: struct #packed {
+PhysicalUIMap :: struct {
     physical_ui_type_id: PhysicalUITypeID,
     note_expression_type_id: NoteExpressionTypeID,
 };
 
-PhysicalUIMapList :: struct #packed {
+PhysicalUIMapList :: struct {
     count: u32,
     ui_map: ^PhysicalUIMap,
 }
 
-PFactoryInfo :: struct #packed {
+PFactoryInfo :: struct {
     vendor: [64]u8,
     url: [256]u8,
     email: [128]u8,
@@ -70,15 +70,15 @@ PFactoryInfo :: struct #packed {
     
 }
 
-PClassInfo :: struct #packed {
-    cid: TUID,
+PClassInfo :: struct {
+    cid: [16]u8,
     cardinality: i32,
     category: [32]u8,
     name: [64]u8,
 }
 
-PClassInfo2 :: struct #packed {
-    cid: TUID,
+PClassInfo2 :: struct {
+    cid: [16]u8,
     cardinality: i32,
     category: [32]u8,
     name: [64]u8,
@@ -89,8 +89,8 @@ PClassInfo2 :: struct #packed {
     sdk_version: [64]u8,
 }
 
-PClassInfoW :: struct #packed {
-    cid: TUID,
+PClassInfoW :: struct {
+    cid: [16]u8,
     cardinality: i32,
     category: [32]u8,
     name: [64]u16,
@@ -101,44 +101,44 @@ PClassInfoW :: struct #packed {
     sdk_version: [64]u16,
 }
 
-BusInfo :: struct #packed {
+BusInfo :: struct {
     media_type: MediaType,
     direction: BusDirection,
     channel_count: i32,
-    name: String128,
+    name: [128]u16,
     bus_type: BusType,
     flags: BusFlags,
 };
 
-RoutingInfo :: struct #packed {
+RoutingInfo :: struct {
     media_type: MediaType,
     bus_index: i32,
     channel: i32,
 }
 
-ParameterInfo :: struct #packed {
+ParameterInfo :: struct {
     id: u32,
-    title: String128,
-    short_title: String128,
-    units: String128,
+    title: [128]u16,
+    short_title: [128]u16,
+    units: [128]u16,
     step_count: i32,
     default_normalised_value: f64,
     unit_id: UnitID,
     flags: i32,
 }
 
-FrameRate :: struct #packed {
+FrameRate :: struct {
     framesPerSecond: u32,
     flags: u32,
 }
 
-Chord :: struct #packed {
+Chord :: struct {
     key_note: u8,
     root_note: u8,
     chord_mask: i16,
 }
 
-ProcessContext :: struct #packed {
+ProcessContext :: struct {
     state: u32,
     sample_rate: f64,
     project_time_samples: i64,
@@ -157,7 +157,7 @@ ProcessContext :: struct #packed {
     samples_to_next_clock: i32,
 }
 
-NoteOnEvent :: struct #packed {
+NoteOnEvent :: struct {
     channel: i16,
     pitch: i16,
     tuning: f32,
@@ -166,7 +166,7 @@ NoteOnEvent :: struct #packed {
     noteId: i32,
 }
 
-NoteOffEvent :: struct #packed {
+NoteOffEvent :: struct {
     channel: i16,
     pitch: i16,
     velocity: f32,
@@ -174,20 +174,20 @@ NoteOffEvent :: struct #packed {
     tuning: f32,
 }
 
-DataEvent :: struct #packed {
+DataEvent :: struct {
     size: u32,
     type: u32,
     bytes: ^u8,
 }
 
-PolyPressureEvent :: struct #packed {
+PolyPressureEvent :: struct {
     channel: i16,
     pitch: i16,
     pressure: f32,
     note_id: i32,
 }
 
-ChordEvent :: struct #packed {
+ChordEvent :: struct {
     root: i16,
     bassNote: i16,
     mask: i16,
@@ -195,14 +195,14 @@ ChordEvent :: struct #packed {
     text: ^u16,
 }
 
-ScaleEvent :: struct #packed {
+ScaleEvent :: struct {
     root: i16,
     mask: i16,
     textLen: u16,
     text: ^u16,
 };
 
-LegacyMIDICCOutEvent :: struct #packed {
+LegacyMIDICCOutEvent :: struct {
     controlNumber: u8,
     channel: i8,
     value: i8,
@@ -221,7 +221,7 @@ EventVariant :: struct #raw_union {
     midi_cc_out: LegacyMIDICCOutEvent,
 }
 
-Event :: struct #packed {
+Event :: struct {
     bus_index: i32,
     sample_offset: i32,
     ppq_position: f64,
@@ -230,26 +230,26 @@ Event :: struct #packed {
     using event: EventVariant,
 }
 
-RepresentationInfo :: struct #packed {
+RepresentationInfo :: struct {
     vendor: [64]u8,
     name: [64]u8,
     version: [64]u8,
     host: [64]u8,
 }
 
-IContextMenuItem :: struct #packed {
-    name: String128,
+IContextMenuItem :: struct {
+    name: [128]u16,
     tag: i32,
     flags: i32,
 }
 
-DataExchangeBlock :: struct #packed {
+DataExchangeBlock :: struct {
     data: rawptr,
     size: u32,
     block_id: u32,
 }
 
-ProcessSetup :: struct #packed {
+ProcessSetup :: struct {
     process_mode: i32,
     symbolic_sample_size: i32,
     max_samples_per_block: i32,
@@ -257,27 +257,24 @@ ProcessSetup :: struct #packed {
 }
 
 AudioBusBufferVariant :: struct #raw_union {
-    buffers_32: ^^f32,
-    buffers_64: ^^f64,
+    buffers_32: [^][^]f32,
+    buffers_64: [^][^]f64,
 }
 
-AudioBusBuffers :: struct #packed {
+AudioBusBuffers :: struct {
     num_channels: i32,
     silence_flags: u64,
     using buffers: AudioBusBufferVariant,
 };
 
-/*----------------------------------------------------------------------------------------------------------------------
-Source: "pluginterfaces/vst/ivstaudioprocessor.h", line 218 */
-
-ProcessData :: struct #packed {
+ProcessData :: struct {
     process_mode: ProcessMode,
     symbolic_sample_size: SymbolicSampleSize,
     num_samples: i32,
     num_inputs: i32,
     num_outputs: i32,
-    inputs: ^AudioBusBuffers,
-    outputs: ^AudioBusBuffers,
+    inputs: [^]AudioBusBuffers,
+    outputs: [^]AudioBusBuffers,
     inputParameterChanges:  ^IParameterChanges,
     outputParameterChanges: ^IParameterChanges,
     input_events: ^IEventList,
@@ -285,16 +282,16 @@ ProcessData :: struct #packed {
     process_context: ^ProcessContext,
 };
 
-UnitInfo :: struct #packed {
+UnitInfo :: struct {
     id: UnitID,
     parent_unit_id: UnitID,
-    name: String128,
+    name: [128]u16,
     program_list_id: i32,
 }
 
-ProgramListInfo :: struct #packed {
+ProgramListInfo :: struct {
     id: i32,
-    name: String128,
+    name: [128]u16,
     program_count: i32,
 }
 

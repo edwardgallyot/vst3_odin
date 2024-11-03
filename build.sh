@@ -1,4 +1,4 @@
-odin build . -debug -file -build-mode:dll -no-entry-point
+odin build . -build-mode:dll -debug -file  -no-entry-point -min-link-libs -no-threaded-checker
 
 echo Post Build Started.
     if [ -d odin.vst3 ]; then 
@@ -20,6 +20,5 @@ echo Post Build Started.
         echo Copying Bundle to System Folders 
         cp -r odin.vst3 $HOME/.vst3
     fi
-
 echo Post Build Completed.
 
