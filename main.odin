@@ -232,6 +232,8 @@ gui_thread :: proc (state: ^GuiState) {
     state.gc = xlib.DefaultGC(state.display, state.screen)
     xlib.Flush(state.display)
     for intrinsics.atomic_load(&state.run) {
+        // TODO(edg): Get the GUI input
+
         resize := intrinsics.atomic_load(&state.resize)
         if resize {
             xlib.MoveResizeWindow(state.display, state.window, 0, 0, state.width, state.height) 
@@ -242,6 +244,7 @@ gui_thread :: proc (state: ^GuiState) {
         }
         xlib.ClearWindow(state.display, state.window)
         xlib.Flush(state.display)
+        // TODO(edg): Send the GUI changes 
         time.accurate_sleep(33300)
     }
     intrinsics.atomic_store(&state.run, true)
