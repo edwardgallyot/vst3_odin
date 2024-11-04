@@ -68,9 +68,19 @@ ParameterFlags := [ParameterId] i32 {
 }
 
 State :: struct {
+    c: runtime.Context,
+
     param_values: [ParameterId]f64,
+    // TODO(edg): what else do we need?
+    interpolation_buffers: [ParameterId][dynamic]f64,
+
     sine_phase: f32,
     processing: bool,
+    sample_rate: f64,
+}
+
+interpolate_buffer :: proc () -> () {
+    // TODO(edg): We should interpolate param changes
 }
 
 to_parameter_id :: proc (v: $I) -> (ParameterId, vst3.Result) where intrinsics.type_is_integer(I) {
@@ -81,7 +91,7 @@ to_parameter_id :: proc (v: $I) -> (ParameterId, vst3.Result) where intrinsics.t
 }
 
 normalise_gain :: proc (v: f64) -> f64 {
-    return math.pow(10, v) / 20
+    return math.pow(10, v) / 20.0
 }
 
 denormalise_gain :: proc (v: f64) -> f64 {
@@ -190,7 +200,9 @@ processor_release :: proc "c" (this: rawptr) -> u32 {
 }
 
 set_bus_arrangements :: proc "c" (this: rawptr, inputs: [^]vst3.SpeakerArrangement, num_inputs: i32, outputs: [^]vst3.SpeakerArrangement, num_outputs: i32) -> vst3.Result {
-    context = runtime.default_context()
+    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    state := &plugin.state
+    context = state.c
     input_ok := true
     for input, i in inputs[0:num_inputs] {
         if i > 0 {
@@ -217,7 +229,9 @@ set_bus_arrangements :: proc "c" (this: rawptr, inputs: [^]vst3.SpeakerArrangeme
 }
 
 get_bus_arrangements :: proc "c" (this: rawptr, bus_direction: vst3.BusDirection, index: i32, speaker: ^vst3.SpeakerArrangement) -> vst3.Result {
-    context = runtime.default_context()
+    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    state := &plugin.state
+    context = state.c
     switch bus_direction {
     case .Input: speaker^ = channel_count_to_speaker_arrangement(InputChannelCount)
     case .Output: speaker^ = channel_count_to_speaker_arrangement(OutputChannelCount)
@@ -233,7 +247,14 @@ get_latency_samples :: proc "c" (rawptr) -> vst3.Result {
     return vst3.Result.Ok
 }
 
-setup_processing :: proc "c" (rawptr, ^vst3.ProcessSetup) -> vst3.Result {
+setup_processing :: proc "c" (this: rawptr, setup: ^vst3.ProcessSetup) -> vst3.Result {
+    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    state := &plugin.state
+    context = state.c
+    for p in ParameterId {
+        state.interpolation_buffers[p] = make([dynamic]f64, setup.max_samples_per_block)
+    }
+    state.sample_rate = setup.sample_rate
     return vst3.Result.Ok
 }
 
@@ -243,21 +264,37 @@ set_processing :: proc "c" (this: rawptr, state: u8) -> vst3.Result {
     return vst3.Result.Ok
 }
 
-process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result {
-    #no_bounds_check {
-        context = runtime.default_context()
-        num_samples := data.num_samples
-        num_inputs := data.num_inputs
-        num_outputs := data.num_outputs
-        bus_outputs := data.outputs[:num_outputs]
-        for bus in bus_outputs {
-            num_channels := bus.num_channels
-            channels := bus.buffers_32[:num_channels]
-            for channel in channels {
+process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result #no_bounds_check {
+    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    state := &plugin.state
+    context = state.c
+    num_samples := data.num_samples
+    num_inputs := data.num_inputs
+    num_outputs := data.num_outputs
+    bus_outputs := data.outputs[:num_outputs]
+
+    for p in ParameterId {
+        // TODO(edg): Interpolate
+    }
+
+    for bus in bus_outputs {
+        num_channels := bus.num_channels
+        channels := bus.buffers_32[:num_channels]
+        for &channel, index in channels {
+            if index == 0 {
                 samples := channel[:num_samples]
-                for &sample in samples {
-                    sample = 0
-                }
+                for &sample, index  in samples {
+                    two_pi :f32 = 2.0 * math.PI
+                    sine_delta: f32 = auto_cast (400.0 / 48000.0) * two_pi
+                    state.sine_phase += sine_delta
+                    state.sine_phase = math.mod_f32(state.sine_phase, two_pi)
+                    sample = math.sin(state.sine_phase)
+                    sample *= 0.1
+                    // TODO(edg): Multiply here by the gain!
+                    // sample *= auto_cast state.interpolation_buffers[ParameterId.Gain][index]
+                } 
+            } else {
+                copy_slice(channel[:num_samples], channels[0][:num_samples])
             }
         }
     }
@@ -389,7 +426,7 @@ plain_param_to_normalised :: proc "c" (this: rawptr, id: u32, value: f64) -> f64
 
 get_param_normalised :: proc "c" (this: rawptr, id: u32) -> f64 {
     context = runtime.default_context()
-    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, controller))
     p, err := to_parameter_id(id)
     if err != nil { return 0 }
     return normalise_parameter(p, plugin.state.param_values[p])
@@ -397,10 +434,10 @@ get_param_normalised :: proc "c" (this: rawptr, id: u32) -> f64 {
 
 set_param_normalised :: proc "c" (this: rawptr, id: u32, value: f64) -> vst3.Result {
     context = runtime.default_context()
-    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, controller))
     p := to_parameter_id(id) or_return
     v := denormalise_parameter(p, value)
-    plugin.state.param_values[p] = denormalise_parameter(p, v)
+    plugin.state.param_values[p] = v 
     return vst3.Result.Ok
 }
 
@@ -706,6 +743,7 @@ create_instance :: proc "c" (this: rawptr, class_id: [^]u8, interface_id: [^]u8,
 
         if slice.equal(f_unknown_id[:], interface_id[0:16]) || slice.equal(i_component_id[:], interface_id[0:16]) {
             plugin := make_plugin()
+            plugin.state.c = context
             obj^ = auto_cast &plugin.component
             return vst3.Result.True
         }
@@ -756,7 +794,7 @@ Factory :: struct #packed {
     ref_count : u32,
 }
 
-@thread_local x: ^Factory
+x: ^Factory
 
 @export ModuleEntry :: proc "c" () -> bool {
     return true
