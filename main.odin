@@ -13,7 +13,11 @@ import "core:os"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
+import "core:thread"
+import "core:time"
 import "core:unicode/utf16"
+
+import xlib "vendor:x11/xlib"
 
 // Example user data:
 
@@ -60,7 +64,7 @@ ParameterStepCounts := [ParameterId] i32 {
 // Parameter Defaults are in their real values, e.g: dB
 ParameterDefaults := [ParameterId] f64 {
     .Bypass = 0.0,
-    .Gain = -200.0,
+    .Gain = -math.F64_MAX,
 }
 
 ParameterFlags := [ParameterId] i32 {
@@ -102,6 +106,19 @@ State :: struct {
     sine_phase: f32,
     processing: bool,
     sample_rate: f64,
+}
+
+sample_tick :: proc "contextless" (state: ^State, $T: typeid) -> T {
+    for p in ParameterId do tick_interpolator(&state.interpolators[p])
+    two_pi :T : 2.0 * math.PI
+    sine_delta: T = auto_cast (400.0 / state.sample_rate) * two_pi
+    state.sine_phase += auto_cast sine_delta
+    state.sine_phase = math.mod_f32(state.sine_phase, auto_cast two_pi)
+    sample := math.sin(state.sine_phase)
+    sample *= f32(state.interpolators[ParameterId.Gain].current)
+    sample *= f32(state.interpolators[ParameterId.Bypass].current)
+    sample *= 0.1
+    return auto_cast sample
 }
 
 to_parameter_id :: proc "contextless" (v: $I) -> (ParameterId, vst3.Result) where intrinsics.type_is_integer(I) {
@@ -190,12 +207,75 @@ channel_count_to_speaker_arrangement :: proc "contextless" (channel_count: u32) 
     return vst3.SpeakerArrangement.Empty
 }
 
-// COM implmentation
+Gui :: struct {
+    thread_handle: ^thread.Thread,
+    state: GuiState,
+}
 
+GuiState :: struct #packed {
+    parent: rawptr,
+    run, resize: bool,
+    width, height: u32,
+    display: ^xlib.Display,
+    window: xlib.Window,
+    screen: i32,
+    gc: xlib.GC,
+}
+
+gui_thread :: proc (state: ^GuiState) {
+    state.display = xlib.OpenDisplay(nil)    
+    state.screen = xlib.DefaultScreen(state.display)
+    state.window = xlib.CreateSimpleWindow(state.display, auto_cast uintptr(state.parent), 0, 0 , 800, 600, 0, 0, xlib.BlackPixel(state.display, state.screen))
+    mask :xlib.EventMask = {.StructureNotify, .KeyPress, .KeyRelease, .ButtonPress, .ButtonRelease}
+    xlib.SelectInput(state.display, state.window, mask)
+    xlib.MapWindow(state.display, state.window)
+    state.gc = xlib.DefaultGC(state.display, state.screen)
+    xlib.Flush(state.display)
+    for intrinsics.atomic_load(&state.run) {
+        resize := intrinsics.atomic_load(&state.resize)
+        if resize {
+            xlib.MoveResizeWindow(state.display, state.window, 0, 0, state.width, state.height) 
+            intrinsics.atomic_store(&state.resize, !resize)
+        }
+        e: xlib.XEvent 
+        for xlib.CheckWindowEvent(state.display, state.window, mask, &e) {
+        }
+        xlib.ClearWindow(state.display, state.window)
+        xlib.Flush(state.display)
+        time.accurate_sleep(33300)
+    }
+    intrinsics.atomic_store(&state.run, true)
+}
+
+start_gui :: proc (gui: ^Gui, parent: rawptr) {
+    gui.state.parent = parent
+    intrinsics.atomic_store(&gui.state.run, true)
+    gui.thread_handle = thread.create_and_start_with_poly_data(&gui.state, gui_thread)
+}
+
+finish_gui :: proc "contextless" (gui: ^Gui) {
+    context = runtime.default_context()
+    intrinsics.atomic_store(&gui.state.run, false)
+    for !intrinsics.atomic_load(&gui.state.run) do continue
+    intrinsics.atomic_store(&gui.state.run, false)
+}
+
+resize_gui :: proc "contextless" (gui: ^Gui, width: u32, height: u32) {
+    state := &gui.state
+    state.width = width
+    state.height = height
+    if intrinsics.atomic_load(&state.run) {
+        intrinsics.atomic_store(&state.resize, true)
+        for intrinsics.atomic_load(&state.resize) do continue
+    }
+}
+
+// COM implmentation
 View :: struct {
     iface: vst3.IPlugView,
     using vtbl: vst3.IPlugViewVtbl,
     ref_count: u32,
+    gui: Gui,
 }
 
 view_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
@@ -227,10 +307,16 @@ is_platform_type_supported :: proc "c" (rawptr, cstring) -> vst3.Result {
 }
 
 attached :: proc "c" (this: rawptr, handle: rawptr, type: cstring) -> vst3.Result {
+    context = runtime.default_context()
+    v: ^View = auto_cast this
+    start_gui(&v.gui, handle)
     return vst3.Result.Ok
 }
 
-removed :: proc "c" (rawptr) -> vst3.Result {
+removed :: proc "c" (this: rawptr) -> vst3.Result {
+    context = runtime.default_context()
+    v: ^View = auto_cast this
+    finish_gui(&v.gui)
     return vst3.Result.Ok
 }
 
@@ -246,11 +332,15 @@ on_key_up :: proc "c" (rawptr, u16, i16, i16) -> vst3.Result {
     return vst3.Result.Ok
 }
 
-get_size :: proc "c" (rawptr, ^vst3.ViewRect) -> vst3.Result {
+get_size :: proc "c" (this: rawptr, size: ^vst3.ViewRect) -> vst3.Result {
     return vst3.Result.Ok
 }
 
-on_size :: proc "c" (rawptr, ^vst3.ViewRect) -> vst3.Result {
+on_size :: proc "c" (this: rawptr, new_size: ^vst3.ViewRect) -> vst3.Result {
+    v: ^View = auto_cast this
+    width := u32(new_size.left + new_size.right)
+    height := u32(new_size.top + new_size.bottom)
+    resize_gui(&v.gui, width, height)
     return vst3.Result.Ok
 }
 
@@ -383,23 +473,30 @@ process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result #no_b
 
     for bus in bus_outputs {
         num_channels := bus.num_channels
-        channels := bus.buffers_32[:num_channels]
-        for &channel, index in channels {
-            if index == 0 {
-                samples := channel[:num_samples]
-                for &sample, index  in samples {
-                    for p in ParameterId do tick_interpolator(&state.interpolators[p])
-                    two_pi :f32 : 2.0 * math.PI
-                    sine_delta: f32 = auto_cast (400.0 / state.sample_rate) * two_pi
-                    state.sine_phase += sine_delta
-                    state.sine_phase = math.mod_f32(state.sine_phase, two_pi)
-                    sample = math.sin(state.sine_phase)
-                    sample *= f32(state.interpolators[ParameterId.Gain].current)
-                    sample *= f32(state.interpolators[ParameterId.Bypass].current)
-                } 
-            } else {
-                copy_slice(channel[:num_samples], channels[0][:num_samples])
-            }
+        if data.symbolic_sample_size == .Sample32 {
+             channels := bus.buffers_32[:num_channels]
+             for &channel, index in channels {
+                 if index == 0 {
+                     samples := channel[:num_samples]
+                     for &sample, index  in samples {
+                         sample = sample_tick(state, f32)
+                     } 
+                 } else {
+                     copy_slice(channel[:num_samples], channels[0][:num_samples])
+                 }
+             }
+        } else {
+             channels := bus.buffers_64[:num_channels]
+             for &channel, index in channels {
+                 if index == 0 {
+                     samples := channel[:num_samples]
+                     for &sample, index  in samples {
+                         sample = sample_tick(state, f64)
+                     } 
+                 } else {
+                     copy_slice(channel[:num_samples], channels[0][:num_samples])
+                 }
+             }
         }
     }
     return vst3.Result.Ok
