@@ -40,7 +40,7 @@ IPlugViewVtbl :: struct #packed {
 }
 
 IPlugView :: struct #packed {
-    using vtbl: IPlugViewVtbl,
+    using vtbl: ^IPlugViewVtbl,
 }
 
 IPlugView_iid :: "5bc32507-d060-49ea-a615-1b522b755b29"

@@ -57,9 +57,10 @@ ParameterStepCounts := [ParameterId] i32 {
     .Gain = 1024,
 }
 
+// Parameter Defaults are in their real values, e.g: dB
 ParameterDefaults := [ParameterId] f64 {
     .Bypass = 0.0,
-    .Gain = 1.0,
+    .Gain = -200.0,
 }
 
 ParameterFlags := [ParameterId] i32 {
@@ -67,42 +68,58 @@ ParameterFlags := [ParameterId] i32 {
     .Gain = i32(vst3.ParameterFlags.CanAutomate)
 }
 
+ParameterInterpolator :: struct {
+    current: f64,
+    target: f64,
+    step: f64,
+    count: f64,
+}
+
+set_interpolator_target :: proc "contextless" (i: ^ParameterInterpolator, v: f64, fs: f64) -> () {
+    interp_ms :: 10
+    step_count := (interp_ms * fs) / 1000.0 // 10ms
+    if v != i.target {
+        i.target = v
+        i.count = step_count
+        i.step = (i.target - i.current) / f64(step_count)
+    }
+}
+
+tick_interpolator :: proc "contextless" (i: ^ParameterInterpolator) {
+    if i.count > 0 {
+        i.count -= 1
+        i.current = i.current + i.step
+    } else {
+        i.count = 0
+        i.current = i.target
+    }
+}
+
 State :: struct {
     c: runtime.Context,
-
     param_values: [ParameterId]f64,
-    // TODO(edg): what else do we need?
-    interpolation_buffers: [ParameterId][dynamic]f64,
-
+    interpolators: [ParameterId]ParameterInterpolator,
     sine_phase: f32,
     processing: bool,
     sample_rate: f64,
 }
 
-interpolate_buffer :: proc () -> () {
-    // TODO(edg): We should interpolate param changes
-}
-
-to_parameter_id :: proc (v: $I) -> (ParameterId, vst3.Result) where intrinsics.type_is_integer(I) {
+to_parameter_id :: proc "contextless" (v: $I) -> (ParameterId, vst3.Result) where intrinsics.type_is_integer(I) {
     if v < 0 || v > (len(ParameterId) - 1) {
         return {}, vst3.Result.InvalidArgument
     }
     return auto_cast v, nil
 }
 
-normalise_gain :: proc (v: f64) -> f64 {
-    return math.pow(10, v) / 20.0
+normalise_gain :: proc "contextless" (v: f64) -> f64 {
+    return math.pow(10, v / 20.0)
 }
 
-denormalise_gain :: proc (v: f64) -> f64 {
-    if v == 0 {
-        return 0
-    } else {
-        return 20 * math.log10(v)
-    }
+denormalise_gain :: proc "contextless" (v: f64) -> f64 {
+    return 20.0 * math.log(v, 10)
 }
 
-normalise_parameter :: proc (p: ParameterId, v: f64) -> f64 {
+normalise_parameter :: proc "contextless" (p: ParameterId, v: f64) -> f64 {
     switch p {
     case .Bypass: return v
     case .Gain: return normalise_gain(v)
@@ -110,7 +127,7 @@ normalise_parameter :: proc (p: ParameterId, v: f64) -> f64 {
     return 0.0
 }
 
-denormalise_parameter :: proc (p: ParameterId, v: f64) -> f64 {
+denormalise_parameter :: proc "contextless" (p: ParameterId, v: f64) -> f64 {
     switch p {
     case .Bypass: return v
     case .Gain: return denormalise_gain(v)
@@ -162,7 +179,7 @@ parameter_denormalised_value_by_string :: proc (p: ParameterId, s: string) -> (f
     return {}, vst3.Result.InvalidArgument
 }
 
-channel_count_to_speaker_arrangement :: proc (channel_count: u32) -> vst3.SpeakerArrangement {
+channel_count_to_speaker_arrangement :: proc "contextless" (channel_count: u32) -> vst3.SpeakerArrangement {
     // Do we event need to support more
     if channel_count == 1 {
         return vst3.SpeakerArrangement.MonoSpeaker
@@ -174,6 +191,103 @@ channel_count_to_speaker_arrangement :: proc (channel_count: u32) -> vst3.Speake
 }
 
 // COM implmentation
+
+View :: struct {
+    iface: vst3.IPlugView,
+    using vtbl: vst3.IPlugViewVtbl,
+    ref_count: u32,
+}
+
+view_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
+    context = runtime.default_context()
+    f_unknown_id := parse_uuid (vst3.FUnknown_iid) or_return
+    i_view_id := parse_uuid (vst3.IPlugView_iid) or_return
+    if slice.equal(id[0:16], i_view_id[0:16]) ||
+       slice.equal(id[0:16], f_unknown_id[0:16]) {
+        obj^ = this
+        return vst3.Result.True
+    }
+    return vst3.Result.NoInterface
+}
+
+view_add_ref :: proc "c" (this: rawptr) -> u32 {
+    v: ^View = auto_cast this
+    v.ref_count += 1
+    return v.ref_count
+}
+
+view_release :: proc "c" (this: rawptr) -> u32 {
+    v: ^View = auto_cast this
+    v.ref_count -= 1
+    return v.ref_count
+}
+
+is_platform_type_supported :: proc "c" (rawptr, cstring) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+attached :: proc "c" (this: rawptr, handle: rawptr, type: cstring) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+removed :: proc "c" (rawptr) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+on_wheel :: proc "c" (rawptr, f32) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+on_key_down :: proc "c" (rawptr, u16, i16, i16) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+on_key_up :: proc "c" (rawptr, u16, i16, i16) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+get_size :: proc "c" (rawptr, ^vst3.ViewRect) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+on_size :: proc "c" (rawptr, ^vst3.ViewRect) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+on_focus :: proc "c" (rawptr, u8) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+set_frame :: proc "c" (rawptr, ^vst3.IPlugFrame) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+can_resize :: proc "c" (rawptr) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+check_size_constraint :: proc "c" (rawptr, ^vst3.ViewRect) -> vst3.Result {
+    return vst3.Result.Ok
+}
+
+init_view :: proc (v: ^View) {
+    v.query_interface = view_query_interface
+    v.add_ref = view_add_ref
+    v.release = view_release
+    v.is_platform_type_supported = is_platform_type_supported
+    v.attached = attached
+    v.removed = removed
+    v.on_wheel = on_wheel
+    v.on_key_down = on_key_down
+    v.on_key_up = on_key_up
+    v.get_size = get_size
+    v.on_size = on_size
+    v.on_focus = on_focus
+    v.set_frame = set_frame
+    v.can_resize = can_resize
+    v.check_size_constraint = check_size_constraint
+    v.iface.vtbl = &v.vtbl
+}
 
 processor_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
     context = runtime.default_context()
@@ -205,33 +319,25 @@ set_bus_arrangements :: proc "c" (this: rawptr, inputs: [^]vst3.SpeakerArrangeme
     context = state.c
     input_ok := true
     for input, i in inputs[0:num_inputs] {
-        if i > 0 {
-            break
-        }
+        if i > 0 do break
         accepted_speaker := channel_count_to_speaker_arrangement(InputChannelCount)
         input_ok = input_ok && (input == vst3.SpeakerArrangement.Empty || input == accepted_speaker)
     }
 
     output_ok := true
     for output, i in outputs[0:num_outputs] {
-        if i > 0 {
-            break
-        }
+        if i > 0 do break
         accepted_speaker := channel_count_to_speaker_arrangement(OutputChannelCount)
         output_ok = output_ok && (output == vst3.SpeakerArrangement.Empty || output == accepted_speaker)
     }
     
-    if input_ok && output_ok {
-        return vst3.Result.True
-    } else {
-        return vst3.Result.False
-    }
+    if !input_ok || !output_ok do return vst3.Result.False
+    return vst3.Result.True
 }
 
 get_bus_arrangements :: proc "c" (this: rawptr, bus_direction: vst3.BusDirection, index: i32, speaker: ^vst3.SpeakerArrangement) -> vst3.Result {
     plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
     state := &plugin.state
-    context = state.c
     switch bus_direction {
     case .Input: speaker^ = channel_count_to_speaker_arrangement(InputChannelCount)
     case .Output: speaker^ = channel_count_to_speaker_arrangement(OutputChannelCount)
@@ -250,10 +356,6 @@ get_latency_samples :: proc "c" (rawptr) -> vst3.Result {
 setup_processing :: proc "c" (this: rawptr, setup: ^vst3.ProcessSetup) -> vst3.Result {
     plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
     state := &plugin.state
-    context = state.c
-    for p in ParameterId {
-        state.interpolation_buffers[p] = make([dynamic]f64, setup.max_samples_per_block)
-    }
     state.sample_rate = setup.sample_rate
     return vst3.Result.Ok
 }
@@ -264,17 +366,19 @@ set_processing :: proc "c" (this: rawptr, state: u8) -> vst3.Result {
     return vst3.Result.Ok
 }
 
+
 process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result #no_bounds_check {
     plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
     state := &plugin.state
-    context = state.c
     num_samples := data.num_samples
     num_inputs := data.num_inputs
     num_outputs := data.num_outputs
     bus_outputs := data.outputs[:num_outputs]
 
     for p in ParameterId {
-        // TODO(edg): Interpolate
+        value := normalise_parameter(p, state.param_values[p])
+        if p == ParameterId.Bypass do value = 1.0 - value
+        set_interpolator_target(&state.interpolators[p], value, state.sample_rate) 
     }
 
     for bus in bus_outputs {
@@ -284,14 +388,14 @@ process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result #no_b
             if index == 0 {
                 samples := channel[:num_samples]
                 for &sample, index  in samples {
-                    two_pi :f32 = 2.0 * math.PI
-                    sine_delta: f32 = auto_cast (400.0 / 48000.0) * two_pi
+                    for p in ParameterId do tick_interpolator(&state.interpolators[p])
+                    two_pi :f32 : 2.0 * math.PI
+                    sine_delta: f32 = auto_cast (400.0 / state.sample_rate) * two_pi
                     state.sine_phase += sine_delta
                     state.sine_phase = math.mod_f32(state.sine_phase, two_pi)
                     sample = math.sin(state.sine_phase)
-                    sample *= 0.1
-                    // TODO(edg): Multiply here by the gain!
-                    // sample *= auto_cast state.interpolation_buffers[ParameterId.Gain][index]
+                    sample *= f32(state.interpolators[ParameterId.Gain].current)
+                    sample *= f32(state.interpolators[ParameterId.Bypass].current)
                 } 
             } else {
                 copy_slice(channel[:num_samples], channels[0][:num_samples])
@@ -411,16 +515,15 @@ get_parameter_value_by_string :: proc "c" (this: rawptr, id: u32, value_string: 
 }
 
 normalised_param_to_plain :: proc "c" (this: rawptr, id: u32, value: f64) -> f64 {
-    context = runtime.default_context()
     p, err := to_parameter_id(id)
-    if err != nil { return 0 }
+    if err != nil do return 0 
     return denormalise_parameter(p, value)
 }
 
 plain_param_to_normalised :: proc "c" (this: rawptr, id: u32, value: f64) -> f64 {
     context = runtime.default_context()
     p, err := to_parameter_id(id)
-    if err != nil { return 0 }
+    if err != nil do return 0 
     return normalise_parameter(p, value)
 }
 
@@ -428,7 +531,7 @@ get_param_normalised :: proc "c" (this: rawptr, id: u32) -> f64 {
     context = runtime.default_context()
     plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, controller))
     p, err := to_parameter_id(id)
-    if err != nil { return 0 }
+    if err != nil do return 0 
     return normalise_parameter(p, plugin.state.param_values[p])
 }
 
@@ -445,8 +548,9 @@ set_component_handler :: proc "c" (rawptr, ^vst3.IComponentHandler) -> vst3.Resu
     return vst3.Result.NotImplemented
 }
 
-create_view :: proc "c" (rawptr, cstring) -> ^vst3.IPlugView {
-    return nil
+create_view :: proc "c" (this: rawptr, name: cstring) -> ^vst3.IPlugView {
+    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, controller))
+    return auto_cast &plugin.controller.view
 }
 
 init_controller :: proc (c: ^Controller) {
@@ -467,12 +571,14 @@ init_controller :: proc (c: ^Controller) {
     c.set_component_handler = set_component_handler
     c.create_view = create_view
     c.iface.vtbl = &c.vtbl
+    init_view(&c.view)
 }
 
 Controller :: struct #packed {
     iface: vst3.IEditController,
     using vtbl: vst3.IEditControllerVtbl,
     ref_count: u32,
+    view: View,
 }
 
 component_add_ref :: proc "c" (this: rawptr) -> u32 {
