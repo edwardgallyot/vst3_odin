@@ -207,6 +207,13 @@ channel_count_to_speaker_arrangement :: proc "contextless" (channel_count: u32) 
     return vst3.SpeakerArrangement.Empty
 }
 
+GuiInitialWidth :: 600
+GuiInitialHeight :: 400
+GuiMaxWidth :: 800
+GuiMinWidth :: 400
+GuiMaxHeight :: 800
+GuiMinHeight :: 400
+
 Gui :: struct {
     thread_handle: ^thread.Thread,
     state: GuiState,
@@ -233,7 +240,6 @@ gui_thread :: proc (state: ^GuiState) {
     xlib.Flush(state.display)
     for intrinsics.atomic_load(&state.run) {
         // TODO(edg): Get the GUI input
-
         resize := intrinsics.atomic_load(&state.resize)
         if resize {
             xlib.MoveResizeWindow(state.display, state.window, 0, 0, state.width, state.height) 
@@ -336,13 +342,19 @@ on_key_up :: proc "c" (rawptr, u16, i16, i16) -> vst3.Result {
 }
 
 get_size :: proc "c" (this: rawptr, size: ^vst3.ViewRect) -> vst3.Result {
+    v: ^View = auto_cast this
+    state := &v.gui.state
+    size.left = 0 
+    size.top = 0
+    size.right = i32(state.width)
+    size.bottom = i32(state.height)
     return vst3.Result.Ok
 }
 
 on_size :: proc "c" (this: rawptr, new_size: ^vst3.ViewRect) -> vst3.Result {
     v: ^View = auto_cast this
-    width := u32(new_size.left + new_size.right)
-    height := u32(new_size.top + new_size.bottom)
+    width := max(min(u32(new_size.left + new_size.right), GuiMaxWidth), GuiMinWidth)
+    height := max(min(u32(new_size.top + new_size.bottom), GuiMaxHeight), GuiMinHeight)
     resize_gui(&v.gui, width, height)
     return vst3.Result.Ok
 }
@@ -359,7 +371,13 @@ can_resize :: proc "c" (rawptr) -> vst3.Result {
     return vst3.Result.Ok
 }
 
-check_size_constraint :: proc "c" (rawptr, ^vst3.ViewRect) -> vst3.Result {
+check_size_constraint :: proc "c" (this: rawptr, new_size: ^vst3.ViewRect) -> vst3.Result {
+    width := max(min(u32(new_size.left + new_size.right), GuiMaxWidth), GuiMinWidth)
+    height := max(min(u32(new_size.top + new_size.bottom), GuiMaxHeight), GuiMinHeight)
+    new_size.left = 0
+    new_size.right = i32(width)
+    new_size.top = 0
+    new_size.bottom = i32(height)
     return vst3.Result.Ok
 }
 
@@ -380,6 +398,8 @@ init_view :: proc (v: ^View) {
     v.can_resize = can_resize
     v.check_size_constraint = check_size_constraint
     v.iface.vtbl = &v.vtbl
+    v.gui.state.width = GuiInitialWidth
+    v.gui.state.height = GuiInitialHeight
 }
 
 processor_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
