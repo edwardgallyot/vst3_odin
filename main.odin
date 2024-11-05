@@ -72,6 +72,42 @@ ParameterFlags := [ParameterId] i32 {
     .Gain = i32(vst3.ParameterFlags.CanAutomate)
 }
 
+// Adapted from https://github.com/rigtorp/SPSCQueue/blob/master/include/rigtorp/SPSCQueue.h
+ParameterUpdateSpscQueueSize :: 32 
+ParameterUpdateSpscQueue :: struct {
+    read: uint,
+    read_cache: uint,
+    write: uint,
+    write_cache: uint,
+    buffer: [ParameterUpdateSpscQueueSize]f64,
+}
+
+push_parameter_update :: proc "contextless" (queue: ^ParameterUpdateSpscQueue, value: f64) -> bool {
+    write := intrinsics.atomic_load_explicit(&queue.write, .Relaxed)
+    next_write := write + 1
+    if next_write == ParameterUpdateSpscQueueSize do next_write = 0 
+    if next_write == queue.read_cache {
+        queue.read_cache = intrinsics.atomic_load_explicit(&queue.read, .Acquire)
+        if next_write == queue.read_cache do return false
+    }
+    queue.buffer[write] = value
+    intrinsics.atomic_store_explicit(&queue.write, next_write, .Release)
+    return true
+}
+
+pop_parameter_update :: proc "contextless" (queue: ^ParameterUpdateSpscQueue) -> (f64, bool) {
+    read := intrinsics.atomic_load_explicit(&queue.read, .Relaxed)
+    if read == queue.write_cache {
+        queue.write_cache = intrinsics.atomic_load_explicit(&queue.write, .Acquire)
+        if queue.write_cache == read do return {}, false
+    }
+    res := queue.buffer[read]
+    next_read := read + 1
+    if next_read == ParameterUpdateSpscQueueSize do next_read = 0
+    intrinsics.atomic_store_explicit(&queue.read, next_read, .Release)
+    return res, true
+}
+
 ParameterInterpolator :: struct {
     current: f64,
     target: f64,
@@ -103,6 +139,7 @@ State :: struct {
     c: runtime.Context,
     param_values: [ParameterId]f64,
     interpolators: [ParameterId]ParameterInterpolator,
+    audio_to_gui, gui_to_audio: [ParameterId]ParameterUpdateSpscQueue,
     sine_phase: f32,
     processing: bool,
     sample_rate: f64,
@@ -115,8 +152,8 @@ sample_tick :: proc "contextless" (state: ^State, $T: typeid) -> T {
     state.sine_phase += auto_cast sine_delta
     state.sine_phase = math.mod_f32(state.sine_phase, auto_cast two_pi)
     sample := math.sin(state.sine_phase)
-    sample *= f32(state.interpolators[ParameterId.Gain].current)
-    sample *= f32(state.interpolators[ParameterId.Bypass].current)
+    sample *= f32(state.interpolators[.Gain].current)
+    sample *= f32(state.interpolators[.Bypass].current)
     sample *= 0.1
     return auto_cast sample
 }
@@ -222,6 +259,7 @@ Gui :: struct {
 GuiState :: struct #packed {
     parent: rawptr,
     run, resize: bool,
+    audio_to_gui, gui_to_audio: ^[ParameterId]ParameterUpdateSpscQueue,
     width, height: u32,
     display: ^xlib.Display,
     window: xlib.Window,
@@ -247,6 +285,7 @@ gui_thread :: proc (state: ^GuiState) {
         }
         e: xlib.XEvent 
         for xlib.CheckWindowEvent(state.display, state.window, mask, &e) {
+            push_parameter_update(&state.gui_to_audio[.Bypass], 12.0)
         }
         xlib.ClearWindow(state.display, state.window)
         xlib.Flush(state.display)
@@ -488,9 +527,15 @@ process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result #no_b
     num_outputs := data.num_outputs
     bus_outputs := data.outputs[:num_outputs]
 
+
     for p in ParameterId {
+        for {
+            v := pop_parameter_update(&state.gui_to_audio[p]) or_break
+            context = runtime.default_context()
+            fmt.println(v)
+        }
         value := normalise_parameter(p, state.param_values[p])
-        if p == ParameterId.Bypass do value = 1.0 - value
+        if p == .Bypass do value = 1.0 - value
         set_interpolator_target(&state.interpolators[p], value, state.sample_rate) 
     }
 
@@ -670,6 +715,9 @@ set_component_handler :: proc "c" (rawptr, ^vst3.IComponentHandler) -> vst3.Resu
 
 create_view :: proc "c" (this: rawptr, name: cstring) -> ^vst3.IPlugView {
     plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, controller))
+    gui_state := &plugin.controller.view.gui.state
+    gui_state.audio_to_gui = &plugin.state.audio_to_gui
+    gui_state.gui_to_audio = &plugin.state.gui_to_audio
     return auto_cast &plugin.controller.view
 }
 
