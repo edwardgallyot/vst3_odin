@@ -6,6 +6,7 @@ import "glx"
 import "base:intrinsics"
 import "base:runtime"
 
+import "core:c"
 import "core:encoding/uuid"
 import "core:fmt"
 import "core:math"
@@ -326,10 +327,46 @@ gui_thread :: proc (state: ^GuiState) {
         background_pixmap = glx.NONE,
         border_pixel = 0,
         event_mask = event_mask,
+        colormap = color_map,
     }
     window_attributes_mask := xlib.WindowAttributeMask {.CWBorderPixel, .CWColormap, .CWEventMask }
-    state.window = xlib.CreateWindow(state.display, auto_cast uintptr(state.parent), 0, 0, 100, 100, 0, visual_info.depth, .InputOutput, visual_info.visual, window_attributes_mask, &window_attributes)
-    state.visual = xlib.DefaultVisual(state.display, state.screen)
+    state.window = xlib.CreateWindow(
+        state.display,
+        auto_cast uintptr(state.parent),
+        0, 0, 100, 100, 
+        0,
+        visual_info.depth,
+        .InputOutput,
+        visual_info.visual,
+        window_attributes_mask,
+        &window_attributes
+    )
+    xlib.SelectInput(state.display, state.window, event_mask)
+    xlib.MapWindow(state.display, state.window)
+    glx_extensions := glx.QueryExtensionsString(state.display, state.screen)
+    GLX_CONTEXT_MAJOR_VERSION_ARB :: 0x2091
+    GLX_CONTEXT_MINOR_VERSION_ARB :: 0x2092
+    glXCreateContextAttribsARBProc :: proc "system" (^xlib.Display, glx.FBConfig, glx.Context, c.bool, [^]i32) -> glx.Context
+    glXCreateContextAttribsARB := glXCreateContextAttribsARBProc(glx.GetProcAddressARB("glXCreateContextAttribsARB"))
+    ctx: glx.Context = nil
+    if !strings.contains(string(glx_extensions), "GLX_ARB_create_context") || glXCreateContextAttribsARB == nil {
+        fmt.println("notfound")
+    } else {
+        context_attribs := []i32 {
+            GLX_CONTEXT_MAJOR_VERSION_ARB, 1,
+            GLX_CONTEXT_MINOR_VERSION_ARB, 0,
+            glx.NONE
+        }
+        ctx = glXCreateContextAttribsARB(state.display, best_config, nil, true, raw_data(context_attribs))
+    }
+    xlib.Sync(state.display)
+
+    glx.MakeCurrent(state.display, auto_cast state.window, ctx );
+    // gl.ClearColor( 0, 0.5, 1, 1 );
+    // gl.Clear( gl.COLOR_BUFFER_BIT );
+    glx.SwapBuffers ( state.display, auto_cast state.window );
+    
+
     for intrinsics.atomic_load(&state.run) {
         for p in ParameterId do for {
             v := pop_parameter_update(&state.audio_to_gui[p]) or_break

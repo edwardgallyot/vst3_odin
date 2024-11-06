@@ -185,13 +185,9 @@ foreign gl {
     @(link_name="glXQueryContext") QueryContext :: proc "system" (^xlib.Display, Context, i32, ^i32) -> i32 ---
     @(link_name="glXSelectEvent") SelectEvent :: proc "system" (^xlib.Display, Drawable, c.ulong)  ---
     @(link_name="glXGetSelectedEvent") GetSelectedEvent :: proc "system" (^xlib.Display, Drawable, ^c.ulong) ---
+    @(link_name="glXGetProcAddressARB") GetProcAddressARB :: proc "system" (cstring) -> rawptr ---
 }
 
-//
-//
-//
-//
-//
 // /* GLX 1.3 function pointer typedefs */
 // typedef GLXFBConfig * (* PFNGLXGETFBCONFIGSPROC) (Display *dpy, int screen, int *nelements);
 // typedef GLXFBConfig * (* PFNGLXCHOOSEFBCONFIGPROC) (Display *dpy, int screen, const int *attrib_list, int *nelements);
