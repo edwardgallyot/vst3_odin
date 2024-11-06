@@ -776,7 +776,7 @@ IParameterChangesVtbl :: struct #packed {
     using unknown: FUnknownVtbl,
     get_parameter_count: proc "c" (rawptr) -> i32,
     get_parameter_data: proc "c" (rawptr, i32) -> ^IParamValueQueue,
-    add_parameter_data: proc "c" (rawptr, ^f64, ^i32) -> ^IParamValueQueue,
+    add_parameter_data: proc "c" (rawptr, ^u32, ^i32) -> ^IParamValueQueue,
 }
 
 IParameterChanges :: struct #packed {

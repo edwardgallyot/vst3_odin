@@ -1,6 +1,7 @@
 package main 
 
 import "vst3"
+import "glx"
 
 import "base:intrinsics"
 import "base:runtime"
@@ -18,6 +19,10 @@ import "core:time"
 import "core:unicode/utf16"
 
 import xlib "vendor:x11/xlib"
+import gl "vendor:OpenGL"
+
+// TODO(edg): Deallocating memory.
+// TODO(edg): LOGGG!!!!
 
 // Example user data:
 
@@ -139,7 +144,8 @@ State :: struct {
     c: runtime.Context,
     param_values: [ParameterId]f64,
     interpolators: [ParameterId]ParameterInterpolator,
-    audio_to_gui, gui_to_audio: [ParameterId]ParameterUpdateSpscQueue,
+    gui_active: bool,
+    audio_to_gui, gui_to_audio, controller_to_audio: [ParameterId]ParameterUpdateSpscQueue,
     sine_phase: f32,
     processing: bool,
     sample_rate: f64,
@@ -246,10 +252,12 @@ channel_count_to_speaker_arrangement :: proc "contextless" (channel_count: u32) 
 
 GuiInitialWidth :: 600
 GuiInitialHeight :: 400
+
 GuiMaxWidth :: 800
 GuiMinWidth :: 400
-GuiMaxHeight :: 800
-GuiMinHeight :: 400
+
+GuiMaxHeight :: 600
+GuiMinHeight :: 200
 
 Gui :: struct {
     thread_handle: ^thread.Thread,
@@ -263,37 +271,241 @@ GuiState :: struct #packed {
     width, height: u32,
     display: ^xlib.Display,
     window: xlib.Window,
+    visual: ^xlib.Visual,
+    image: ^xlib.XImage,
+    buffer: [dynamic]u32,
     screen: i32,
     gc: xlib.GC,
+    param_cache: [ParameterId]f64,
 }
 
+// TODO(edg): Fix woefully inefficient drawing code
 gui_thread :: proc (state: ^GuiState) {
-    state.display = xlib.OpenDisplay(nil)    
+    context = runtime.default_context()
+    state.display = xlib.OpenDisplay(nil)
     state.screen = xlib.DefaultScreen(state.display)
-    state.window = xlib.CreateSimpleWindow(state.display, auto_cast uintptr(state.parent), 0, 0 , 800, 600, 0, 0, xlib.BlackPixel(state.display, state.screen))
-    mask :xlib.EventMask = {.StructureNotify, .KeyPress, .KeyRelease, .ButtonPress, .ButtonRelease}
-    xlib.SelectInput(state.display, state.window, mask)
-    xlib.MapWindow(state.display, state.window)
-    state.gc = xlib.DefaultGC(state.display, state.screen)
-    xlib.Flush(state.display)
+
+    @static visual_attribs := []i32 {
+        glx.X_RENDERABLE, 1,
+        glx.DRAWABLE_TYPE, glx.WINDOW_BIT,
+        glx.RENDER_TYPE, glx.RGBA_BIT,
+        glx.X_VISUAL_TYPE, glx.TRUE_COLOR,
+        glx.RED_SIZE, 8,
+        glx.GREEN_SIZE, 8,
+        glx.BLUE_SIZE, 8,
+        glx.ALPHA_SIZE, 8,
+        glx.DEPTH_SIZE, 24,
+        glx.STENCIL_SIZE, 8,
+        glx.DOUBLEBUFFER, 1,
+        glx.NONE
+    }
+
+    major, minor: i32
+    res := glx.QueryVersion(state.display, &major, &minor)
+    if (!res) || (major == 1 && minor < 3) || (major < 1) do return
+    fb_count: i32
+    fb_config := glx.ChooseFBConfig(state.display, state.screen, raw_data(visual_attribs), &fb_count) 
+
+    best_fbc, worst_fbc, best_num_samp, worst_num_samp := i32(-1), i32(-1), i32(-1), i32(999)
+    if fb_config == nil do return 
+    for &c, i in fb_config[:fb_count] {
+        visual_info := glx.GetVisualFromFBConfig(state.display, c)
+        samp_buf, samples: i32 
+        glx.GetFBConfigAttrib(state.display, c, glx.SAMPLE_BUFFERS, &samp_buf)
+        glx.GetFBConfigAttrib(state.display, c, glx.SAMPLES, &samples)
+        if (best_fbc < 0) || (samp_buf != 0) && (samples > best_num_samp) do best_fbc, best_num_samp = i32(i), samples
+        if (worst_fbc < 0) || (samp_buf == 0) || (samples < worst_num_samp) do worst_fbc, worst_num_samp = i32(i), samples
+        xlib.Free(visual_info)
+    }
+    best_config := fb_config[best_fbc]
+    xlib.Free(fb_config)
+    visual_info := glx.GetVisualFromFBConfig(state.display, best_config)
+    color_map := xlib.CreateColormap(state.display, auto_cast uintptr(state.parent), visual_info.visual, .AllocNone)
+    event_mask := xlib.EventMask { .StructureNotify, .KeyPress, .KeyRelease, .ButtonPress, .ButtonRelease }
+    window_attributes := xlib.XSetWindowAttributes {
+        background_pixmap = glx.NONE,
+        border_pixel = 0,
+        event_mask = event_mask,
+    }
+    window_attributes_mask := xlib.WindowAttributeMask {.CWBorderPixel, .CWColormap, .CWEventMask }
+    state.window = xlib.CreateWindow(state.display, auto_cast uintptr(state.parent), 0, 0, 100, 100, 0, visual_info.depth, .InputOutput, visual_info.visual, window_attributes_mask, &window_attributes)
+    state.visual = xlib.DefaultVisual(state.display, state.screen)
     for intrinsics.atomic_load(&state.run) {
-        // TODO(edg): Get the GUI input
+        for p in ParameterId do for {
+            v := pop_parameter_update(&state.audio_to_gui[p]) or_break
+            state.param_cache[p] = v
+        }
         resize := intrinsics.atomic_load(&state.resize)
         if resize {
-            xlib.MoveResizeWindow(state.display, state.window, 0, 0, state.width, state.height) 
             intrinsics.atomic_store(&state.resize, !resize)
         }
-        e: xlib.XEvent 
-        for xlib.CheckWindowEvent(state.display, state.window, mask, &e) {
-            push_parameter_update(&state.gui_to_audio[.Bypass], 12.0)
-        }
-        xlib.ClearWindow(state.display, state.window)
-        xlib.Flush(state.display)
-        // TODO(edg): Send the GUI changes 
-        time.accurate_sleep(33300)
     }
     intrinsics.atomic_store(&state.run, true)
+    // context = runtime.default_context()
+    // state.display = xlib.OpenDisplay(nil)
+    // state.screen = xlib.DefaultScreen(state.display)
+    // state.window = xlib.CreateSimpleWindow(state.display, auto_cast uintptr(state.parent), 0, 0 , 800, 600, 0, 0, xlib.BlackPixel(state.display, state.screen))
+    // state.visual = xlib.DefaultVisual(state.display, state.screen)
+    // mask := xlib.EventMask { .StructureNotify, .KeyPress, .KeyRelease, .ButtonPress, .ButtonRelease }
+    // xlib.SelectInput(state.display, state.window, mask)
+    // xlib.MapWindow(state.display, state.window)
+    // state.gc = xlib.DefaultGC(state.display, state.screen)
+    // for intrinsics.atomic_load(&state.run) {
+    //     for p in ParameterId do for {
+    //         v := pop_parameter_update(&state.audio_to_gui[p]) or_break
+    //         state.param_cache[p] = v
+    //     }
+    //     resize := intrinsics.atomic_load(&state.resize)
+    //     height := state.height
+    //     width := state.width
+    //     if resize {
+    //         if state.image != nil {
+    //             free_all(context.temp_allocator)
+    //             state.image.data = nil
+    //             xlib.DestroyImage(state.image)
+    //             state.image = nil
+    //         }
+    //         state.buffer = make([dynamic]u32, state.width * state.height, context.temp_allocator)
+    //         width = state.width
+    //         height = state.height
+    //         xlib.MoveResizeWindow(state.display, state.window, 0, 0, state.width, state.height) 
+    //         // fill_pixel_buffer(state, state.buffer[:], width, height)
+    //         // state.image = xlib.CreateImage(state.display, state.visual, 24, .ZPixmap, 0, raw_data(state.buffer), width, height, 32, 0)
+    //         // xlib.PutImage(state.display, state.window, state.gc, state.image, 0, 0, 0, 0, width, height)
+    //         xlib.Flush(state.display)
+    //         intrinsics.atomic_store(&state.resize, !resize)
+    //     }
+    //     e := xlib.XEvent{}
+    //     for xlib.CheckWindowEvent(state.display, state.window, mask, &e) {
+    //         #partial switch e.type {
+    //         case .ButtonPress:
+    //             current_bypass := state.param_cache[.Bypass]
+    //             state.param_cache[.Bypass] = 0.0 if current_bypass > 0.5 else 1.0
+    //             push_parameter_update(&state.gui_to_audio[.Bypass], state.param_cache[.Bypass])
+    //         }
+    //     }
+    //     // xlib.PutImage(state.display, state.window, state.gc, state.image, 0, 0, 0, 0, width, height)
+    //     // fill_pixel_buffer(state, state.buffer[:], width, height)
+    //     xlib.Flush(state.display)
+    //     time.accurate_sleep(33300)
+    // }
+    // intrinsics.atomic_store(&state.run, true)
 }
+
+// // Helper function to set a pixel within bounds
+// set_pixel :: proc(buffer: []u32, x, y, width, height: int, color: u32) {
+//     if x >= 0 && y >= 0 && x < width && y < height {
+//         buffer[y * width + x] = color
+//     }
+// }
+//
+// draw_horizontal_line :: proc(buffer: []u32, y, x_start, x_end, width, height  : int, color: u32) {
+//     for x := x_start; x <= x_end; x += 1 {
+//         if x >= 0 && y >= 0 && x < width && y < height {
+//             buffer[y * width + x] = color
+//         }
+//     }
+// }
+//
+// outline_circle :: proc (buffer: []u32, width, height, center_x, center_y, radius: int, color: u32) {
+//     t1 := radius / 16
+//     x := radius
+//     y := 0
+//     for x >= y {
+//         // Set all eight symmetric pixels
+//         set_pixel(buffer, center_x + x, center_y + y, width, height, color)
+//         set_pixel(buffer, center_x - x, center_y + y, width, height, color)
+//         set_pixel(buffer, center_x + x, center_y - y, width, height, color)
+//         set_pixel(buffer, center_x - x, center_y - y, width, height, color)
+//         set_pixel(buffer, center_x + y, center_y + x, width, height, color)
+//         set_pixel(buffer, center_x - y, center_y + x, width, height, color)
+//         set_pixel(buffer, center_x + y, center_y - x, width, height, color)
+//         set_pixel(buffer, center_x - y, center_y - x, width, height, color)
+//         y += 1
+//         t1 += y
+//         t2 := t1 - x
+//         if t2 >= 0 {
+//             t1 = t2
+//             x -= 1
+//         }
+//     }
+// }
+//
+// fill_circle :: proc (buffer: []u32, width, height, center_x, center_y, radius: int, color: u32) {
+//     t1 := radius / 16
+//     x := radius
+//     y := 0
+//     for x >= y {
+//         draw_horizontal_line(buffer, center_y + y, center_x - x, center_x + x, width, height, color)
+//         draw_horizontal_line(buffer, center_y - y, center_x - x, center_x + x, width, height, color)
+//         draw_horizontal_line(buffer, center_y + x, center_x - y, center_x + y, width, height, color)
+//         draw_horizontal_line(buffer, center_y - x, center_x - y, center_x + y, width, height, color)
+//         y += 1
+//         t1 += y
+//         t2 := t1 - x
+//         if t2 >= 0 {
+//             t1 = t2
+//             x -= 1
+//         }
+//     }
+// }
+//
+// draw_filled_pie_slice :: proc "contextless" (buffer: []u32, width, height, center_x, center_y, radius: int, color: u32, start_angle, end_angle: f32) {
+//     t1 := radius / 16
+//     x := radius
+//     y := 0
+//
+//     for x >= y {
+//         // Draw horizontal lines for each segment if they fall within the angle range
+//         draw_pie_slice_horizontal_line(buffer, width, height, center_x, center_y, center_x - x, center_x + x, center_y + y, color, start_angle, end_angle)
+//         draw_pie_slice_horizontal_line(buffer, width, height, center_x, center_y, center_x - x, center_x + x, center_y - y, color, start_angle, end_angle)
+//         draw_pie_slice_horizontal_line(buffer, width, height, center_x, center_y, center_x - y, center_x + y, center_y + x, color, start_angle, end_angle)
+//         draw_pie_slice_horizontal_line(buffer, width, height, center_x, center_y, center_x - y, center_x + y, center_y - x, color, start_angle, end_angle)
+//
+//         y += 1
+//         t1 += y
+//         t2 := t1 - x
+//         if t2 >= 0 {
+//             t1 = t2
+//             x -= 1
+//         }
+//     }
+// }
+//
+// // Helper function to determine if an angle is within the specified range
+// angle_in_range :: proc "contextless" (angle, start, end: f32) -> bool {
+//     return (start <= angle && angle <= end) || (start > end && (angle >= start || angle <= end))
+// }
+//
+// // Helper function to draw a horizontal line for the pie slice if it falls within the angle range
+// draw_pie_slice_horizontal_line :: proc "contextless" (buffer: []u32, width, height, center_x, center_y, x_start, x_end, y: int, color: u32, start_angle, end_angle: f32) {
+//     for x := x_start; x <= x_end; x += 1 {
+//         dx := x - center_x
+//         dy := y - center_y
+//         angle := math.atan2(f32(dy), f32(dx)) * 180.0 / math.PI
+//
+//         // Check if angle is within the specified start and end angle for the slice
+//         if angle_in_range(angle, start_angle, end_angle) {
+//             if x >= 0 && y >= 0 && x < width && y < height {
+//                 buffer[y * width + x] = color
+//             }
+//         }
+//     }
+// }
+//
+// fill_pixel_buffer :: #force_inline proc (state: ^GuiState, buffer: []u32, width: u32, height: u32) { 
+//     for row in 0..<height do for column in 0..<width {
+//         pixel := &buffer[(width * row) + column]
+//         if state.param_cache[.Bypass] > 0.5 {
+//             pixel^ = 0xffff0000 
+//         } else {
+//             pixel^ = 0xff00ff00
+//         }
+//     }
+//     fill_circle(buffer, int(width), int(height), int(width / 2), int(height / 2), 100, 0xff0000ff)
+//      
+//     draw_filled_pie_slice(buffer, int(width), int(height), int(width / 2), int(height / 2), 100, 0xffccaabb, 50, 120)
+// }
 
 start_gui :: proc (gui: ^Gui, parent: rawptr) {
     gui.state.parent = parent
@@ -306,6 +518,7 @@ finish_gui :: proc "contextless" (gui: ^Gui) {
     intrinsics.atomic_store(&gui.state.run, false)
     for !intrinsics.atomic_load(&gui.state.run) do continue
     intrinsics.atomic_store(&gui.state.run, false)
+    thread.destroy(gui.thread_handle)
 }
 
 resize_gui :: proc "contextless" (gui: ^Gui, width: u32, height: u32) {
@@ -356,15 +569,25 @@ is_platform_type_supported :: proc "c" (rawptr, cstring) -> vst3.Result {
 
 attached :: proc "c" (this: rawptr, handle: rawptr, type: cstring) -> vst3.Result {
     context = runtime.default_context()
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller) - offset_of(Controller, view))
     v: ^View = auto_cast this
+    v^ = {}
+    init_view(v)
+    gui_state := &v.gui.state
+    gui_state.audio_to_gui = &plugin.state.audio_to_gui
+    gui_state.gui_to_audio = &plugin.state.gui_to_audio
+    intrinsics.atomic_store(&plugin.state.gui_active, true)
+    for p in ParameterId do v.gui.state.param_cache[p] = intrinsics.atomic_load(&plugin.state.param_values[p])
     start_gui(&v.gui, handle)
     return vst3.Result.Ok
 }
 
 removed :: proc "c" (this: rawptr) -> vst3.Result {
     context = runtime.default_context()
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller) - offset_of(Controller, view))
     v: ^View = auto_cast this
     finish_gui(&v.gui)
+    intrinsics.atomic_store(&plugin.state.gui_active, false)
     return vst3.Result.Ok
 }
 
@@ -466,7 +689,7 @@ processor_release :: proc "c" (this: rawptr) -> u32 {
 }
 
 set_bus_arrangements :: proc "c" (this: rawptr, inputs: [^]vst3.SpeakerArrangement, num_inputs: i32, outputs: [^]vst3.SpeakerArrangement, num_outputs: i32) -> vst3.Result {
-    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, processor))
     state := &plugin.state
     context = state.c
     input_ok := true
@@ -488,7 +711,7 @@ set_bus_arrangements :: proc "c" (this: rawptr, inputs: [^]vst3.SpeakerArrangeme
 }
 
 get_bus_arrangements :: proc "c" (this: rawptr, bus_direction: vst3.BusDirection, index: i32, speaker: ^vst3.SpeakerArrangement) -> vst3.Result {
-    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, processor))
     state := &plugin.state
     switch bus_direction {
     case .Input: speaker^ = channel_count_to_speaker_arrangement(InputChannelCount)
@@ -506,38 +729,77 @@ get_latency_samples :: proc "c" (rawptr) -> vst3.Result {
 }
 
 setup_processing :: proc "c" (this: rawptr, setup: ^vst3.ProcessSetup) -> vst3.Result {
-    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, processor))
     state := &plugin.state
     state.sample_rate = setup.sample_rate
     return vst3.Result.Ok
 }
 
 set_processing :: proc "c" (this: rawptr, state: u8) -> vst3.Result {
-    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, processor))
     plugin.state.processing = auto_cast state 
     return vst3.Result.Ok
 }
 
+send_parameter_to_host :: proc "contextless" (changes: ^vst3.IParameterChanges, p: ParameterId, v: f64) {
+    index := i32(0)
+    id := u32(p)
+    queue := changes->add_parameter_data(&id, &index)
+    queue->add_point(0, normalise_parameter(p, v), &index)
+}
 
 process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result #no_bounds_check {
-    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, processor))
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, processor))
     state := &plugin.state
+
+    @static param_cache := [ParameterId]f64{}
+    for p in ParameterId do param_cache[p] = intrinsics.atomic_load(&state.param_values[p])
+
+    // host parameter updating 
+    input_changes := data.inputParameterChanges
+    num_params := input_changes->get_parameter_count()
+    for i in 0..<num_params {
+        queue := input_changes->get_parameter_data(i) 
+        point_count := queue->get_point_count()
+        for p in 0..<point_count {
+            value, offset := f64(0), i32(0)
+            queue->get_point(p, &offset, &value)
+            param_id := to_parameter_id(queue->get_parameter_id()) or_continue
+            denorm := denormalise_parameter(param_id, value)
+            param_cache[param_id] = denorm
+            push_parameter_update(&state.audio_to_gui[param_id], denorm)
+        }
+    }
+
+    // our parameter updating
+    output_changes := data.outputParameterChanges
+    for p in ParameterId {
+        // gui changes
+        for {
+            v := pop_parameter_update(&state.gui_to_audio[p]) or_break
+            param_cache[p] = v
+            send_parameter_to_host(output_changes, p, v)
+        }
+
+        // disk changes
+        for {
+            v := pop_parameter_update(&state.controller_to_audio[p]) or_break
+            param_cache[p] = v
+            push_parameter_update(&state.audio_to_gui[p], v)
+            send_parameter_to_host(output_changes, p, v)
+        }
+
+        // set interpolators
+        value := normalise_parameter(p, param_cache[p])
+        if p == .Bypass do value = 1.0 - value
+        set_interpolator_target(&state.interpolators[p], value, state.sample_rate) 
+    }
+
+    // audio processing
     num_samples := data.num_samples
     num_inputs := data.num_inputs
     num_outputs := data.num_outputs
     bus_outputs := data.outputs[:num_outputs]
-
-
-    for p in ParameterId {
-        for {
-            v := pop_parameter_update(&state.gui_to_audio[p]) or_break
-            context = runtime.default_context()
-            fmt.println(v)
-        }
-        value := normalise_parameter(p, state.param_values[p])
-        if p == .Bypass do value = 1.0 - value
-        set_interpolator_target(&state.interpolators[p], value, state.sample_rate) 
-    }
 
     for bus in bus_outputs {
         num_channels := bus.num_channels
@@ -546,9 +808,7 @@ process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result #no_b
              for &channel, index in channels {
                  if index == 0 {
                      samples := channel[:num_samples]
-                     for &sample, index  in samples {
-                         sample = sample_tick(state, f32)
-                     } 
+                     for &sample, index  in samples do sample = sample_tick(state, f32)
                  } else {
                      copy_slice(channel[:num_samples], channels[0][:num_samples])
                  }
@@ -558,15 +818,15 @@ process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result #no_b
              for &channel, index in channels {
                  if index == 0 {
                      samples := channel[:num_samples]
-                     for &sample, index  in samples {
-                         sample = sample_tick(state, f64)
-                     } 
+                     for &sample, index  in samples do sample = sample_tick(state, f64)
                  } else {
                      copy_slice(channel[:num_samples], channels[0][:num_samples])
                  }
              }
         }
     }
+
+    for p in ParameterId do intrinsics.atomic_store(&state.param_values[p], param_cache[p])
     return vst3.Result.Ok
 }
 
@@ -631,11 +891,30 @@ set_component_state :: proc "c" (rawptr, ^vst3.IBStream) -> vst3.Result {
     return vst3.Result.Ok
 }
 
-controller_set_state :: proc "c" (rawptr, ^vst3.IBStream) -> vst3.Result {
+controller_set_state :: proc "c" (this: rawptr, stream: ^vst3.IBStream) -> vst3.Result {
+    context = runtime.default_context()
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller))
+    num_read := i32(0)
+    for p in ParameterId {
+        param := i32(p)
+        value := f64(0) 
+        stream->read(&param, size_of(i32), &num_read)
+        stream->read(&value, size_of(f64) , &num_read)
+        push_parameter_update(&plugin.state.controller_to_audio[p], value) 
+    }
     return vst3.Result.Ok
 }
 
-controller_get_state :: proc "c" (rawptr, ^vst3.IBStream) -> vst3.Result {
+controller_get_state :: proc "c" (this: rawptr, stream: ^vst3.IBStream) -> vst3.Result {
+    context = runtime.default_context()
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller))
+    num_written := i32(0)
+    for p in ParameterId {
+        param := i32(p)
+        value := intrinsics.atomic_load(&plugin.state.param_values[p])
+        stream->write(&param, size_of(i32), &num_written)
+        stream->write(&value, size_of(f64), &num_written)
+    }
     return vst3.Result.Ok
 }
 
@@ -686,26 +965,24 @@ normalised_param_to_plain :: proc "c" (this: rawptr, id: u32, value: f64) -> f64
 }
 
 plain_param_to_normalised :: proc "c" (this: rawptr, id: u32, value: f64) -> f64 {
-    context = runtime.default_context()
     p, err := to_parameter_id(id)
     if err != nil do return 0 
     return normalise_parameter(p, value)
 }
 
 get_param_normalised :: proc "c" (this: rawptr, id: u32) -> f64 {
-    context = runtime.default_context()
-    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, controller))
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller))
     p, err := to_parameter_id(id)
     if err != nil do return 0 
-    return normalise_parameter(p, plugin.state.param_values[p])
+    v := intrinsics.atomic_load(&plugin.state.param_values[p])
+    return normalise_parameter(p, v)
 }
 
 set_param_normalised :: proc "c" (this: rawptr, id: u32, value: f64) -> vst3.Result {
-    context = runtime.default_context()
-    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, controller))
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller))
     p := to_parameter_id(id) or_return
     v := denormalise_parameter(p, value)
-    plugin.state.param_values[p] = v 
+    intrinsics.atomic_store(&plugin.state.param_values[p], v)
     return vst3.Result.Ok
 }
 
@@ -714,10 +991,7 @@ set_component_handler :: proc "c" (rawptr, ^vst3.IComponentHandler) -> vst3.Resu
 }
 
 create_view :: proc "c" (this: rawptr, name: cstring) -> ^vst3.IPlugView {
-    plugin: ^Plugin = auto_cast (cast(uintptr)this - offset_of(Plugin, controller))
-    gui_state := &plugin.controller.view.gui.state
-    gui_state.audio_to_gui = &plugin.state.audio_to_gui
-    gui_state.gui_to_audio = &plugin.state.gui_to_audio
+    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller))
     return auto_cast &plugin.controller.view
 }
 
@@ -1094,7 +1368,7 @@ x: ^Factory
         x.set_host_context = set_host_context
         x.iface.vtbl = &x.vtbl
     } else {
-        x.add_ref(auto_cast x)
+        x->add_ref()
     }
     return auto_cast x
 }
