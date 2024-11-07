@@ -308,7 +308,25 @@ gui_thread :: proc (state: ^GuiState) {
     res := glx.QueryVersion(state.display, &major, &minor)
     if (!res) || (major == 1 && minor < 3) || (major < 1) do return
     fb_count: i32
-    fb_config := glx.ChooseFBConfig(state.display, state.screen, nil, &fb_count) 
+    @static visual_attribs := []i32 {
+        glx.X_RENDERABLE, 1,
+        glx.DRAWABLE_TYPE, glx.WINDOW_BIT,
+        glx.RENDER_TYPE, glx.RGBA_BIT,
+        glx.X_VISUAL_TYPE, glx.TRUE_COLOR,
+        glx.RED_SIZE, 8,
+        glx.GREEN_SIZE, 8,
+        glx.BLUE_SIZE, 8,
+        glx.ALPHA_SIZE, 8,
+        glx.DEPTH_SIZE, 24,
+        glx.STENCIL_SIZE, 8,
+        glx.DOUBLEBUFFER, 1,
+        glx.NONE
+    }
+    // try our ideal attribs
+    fb_config := glx.ChooseFBConfig(state.display, state.screen, raw_data(visual_attribs), &fb_count) 
+    // try any attribs 
+    if fb_config == nil do fb_config = glx.ChooseFBConfig(state.display, state.screen, nil, &fb_count)
+    // TODO(edg): Log critical for the ui thread??
     if fb_config == nil do return
     best_fbc, worst_fbc, best_num_samp, worst_num_samp := i32(-1), i32(-1), i32(-1), i32(999)
     for c, i in fb_config[:fb_count] {
@@ -338,7 +356,7 @@ gui_thread :: proc (state: ^GuiState) {
     state.window = xlib.CreateWindow(
         state.display,
         auto_cast uintptr(state.parent),
-        0, 0, 200, 200, 
+        0, 0, GuiInitialWidth, GuiInitialHeight, 
         0,
         visual_info.depth,
         .InputOutput,
@@ -362,9 +380,10 @@ gui_thread :: proc (state: ^GuiState) {
     gl_set_proc_address :: proc (p: rawptr, name: cstring) {
         (cast(^rawptr)p)^ = rawptr(glx.GetProcAddress(name))
     }
-
     gl.load_up_to(3, 3, gl_set_proc_address)
-    glx.MakeCurrent(state.display, auto_cast state.window, ctx );
+    if !glx.MakeCurrent(state.display, auto_cast state.window, ctx ) do return
+
+    xlib.Sync(state.display)
     version := gl.GetString(gl.VERSION)
     fmt.println("loaded gl context with", version)
 
@@ -417,11 +436,13 @@ gui_thread :: proc (state: ^GuiState) {
     //
     // gl.GenerateMipmap(gl.TEXTURE_2D)
     
+    fmt.println(gl.GetError())
     for intrinsics.atomic_load(&state.run) {
         // get audio thread updates
         start := time.now()
         for p in ParameterId do for {
             v := pop_parameter_update(&state.audio_to_gui[p]) or_break
+            fmt.println(p, v)
             state.param_cache[p] = v
         }
 
@@ -435,6 +456,7 @@ gui_thread :: proc (state: ^GuiState) {
             // TODO(edg): This flickers
             gl.Viewport(0, 0, i32(width), i32(height))
             xlib.MoveResizeWindow(state.display, state.window, 0, 0, width, height) 
+            xlib.Sync(state.display)
         }
 
         // handle events
@@ -455,13 +477,11 @@ gui_thread :: proc (state: ^GuiState) {
             gl.ClearColor( 0, 1, 0, 0 );
         }
 
-        gl.Clear( gl.COLOR_BUFFER_BIT );
+        gl.Clear( gl.COLOR_BUFFER_BIT);
         gl.DrawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, nil)
         // gl.DrawArrays(gl.TRIANGLES, 0, 6)
-
         glx.SwapBuffers ( state.display, auto_cast state.window );
         xlib.Sync(state.display)
-
         // sleep
         end := time.now()
         diff := time.duration_nanoseconds(time.diff (start, end))
@@ -598,13 +618,7 @@ can_resize :: proc "c" (rawptr) -> vst3.Result {
 }
 
 check_size_constraint :: proc "c" (this: rawptr, new_size: ^vst3.ViewRect) -> vst3.Result {
-    width := max(min(u32(new_size.left + new_size.right), GuiMaxWidth), GuiMinWidth)
-    height := max(min(u32(new_size.top + new_size.bottom), GuiMaxHeight), GuiMinHeight)
-    new_size.left = 0
-    new_size.right = i32(width)
-    new_size.top = 0
-    new_size.bottom = i32(height)
-    return vst3.Result.Ok
+    return vst3.Result.NotImplemented
 }
 
 init_view :: proc (v: ^View) {
@@ -721,6 +735,8 @@ process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result #no_b
     @static param_cache := [ParameterId]f64{}
     for p in ParameterId do param_cache[p] = intrinsics.atomic_load(&state.param_values[p])
 
+    gui_active := intrinsics.atomic_load(&state.gui_active)
+
     // host parameter updating 
     input_changes := data.inputParameterChanges
     num_params := input_changes->get_parameter_count()
@@ -733,7 +749,7 @@ process :: proc "c" (this: rawptr, data: ^vst3.ProcessData) -> vst3.Result #no_b
             param_id := to_parameter_id(queue->get_parameter_id()) or_continue
             denorm := denormalise_parameter(param_id, value)
             param_cache[param_id] = denorm
-            push_parameter_update(&state.audio_to_gui[param_id], denorm)
+            if gui_active do push_parameter_update(&state.audio_to_gui[param_id], denorm)
         }
     }
 
