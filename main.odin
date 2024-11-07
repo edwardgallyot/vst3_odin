@@ -9,6 +9,7 @@ import "base:runtime"
 import "core:c"
 import "core:encoding/uuid"
 import "core:fmt"
+import "core:image/bmp"
 import "core:math"
 import "core:mem"
 import "core:os"
@@ -79,7 +80,7 @@ ParameterFlags := [ParameterId] i32 {
 }
 
 // Adapted from https://github.com/rigtorp/SPSCQueue/blob/master/include/rigtorp/SPSCQueue.h
-ParameterUpdateSpscQueueSize :: 32 
+ParameterUpdateSpscQueueSize :: 16
 ParameterUpdateSpscQueue :: struct {
     read: uint,
     read_cache: uint,
@@ -132,7 +133,7 @@ set_interpolator_target :: proc "contextless" (i: ^ParameterInterpolator, v: f64
 }
 
 tick_interpolator :: proc "contextless" (i: ^ParameterInterpolator) {
-    if i.count > 0 {
+    if i.count > 0 { 
         i.count -= 1
         i.current = i.current + i.step
     } else {
@@ -146,7 +147,9 @@ State :: struct {
     param_values: [ParameterId]f64,
     interpolators: [ParameterId]ParameterInterpolator,
     gui_active: bool,
-    audio_to_gui, gui_to_audio, controller_to_audio: [ParameterId]ParameterUpdateSpscQueue,
+    audio_to_gui, 
+    gui_to_audio, 
+    controller_to_audio: [ParameterId]ParameterUpdateSpscQueue,
     sine_phase: f32,
     processing: bool,
     sample_rate: f64,
@@ -272,68 +275,70 @@ GuiState :: struct #packed {
     width, height: u32,
     display: ^xlib.Display,
     window: xlib.Window,
-    visual: ^xlib.Visual,
-    image: ^xlib.XImage,
     buffer: [dynamic]u32,
     screen: i32,
     gc: xlib.GC,
     param_cache: [ParameterId]f64,
 }
 
-// TODO(edg): Fix woefully inefficient drawing code
+compile_shader_from_file :: proc ($file: string, shader_type: u32) -> (u32, bool) {
+    status: i32
+    shader := gl.CreateShader(shader_type)
+    src := cstring(#load(file))
+    gl.ShaderSource(shader, 1, &src, nil)
+    gl.CompileShader(shader)
+
+    if gl.GetShaderiv(shader, gl.COMPILE_STATUS, &status); status != 1 {
+        buffer: [512]u8
+        gl.GetShaderInfoLog(shader, 512, nil, raw_data(buffer[:]))
+        error := cstring(raw_data(buffer[:]))
+        fmt.println("error loading", file, ":", error)
+        return {}, false 
+    }
+    return shader, true 
+}
+
 gui_thread :: proc (state: ^GuiState) {
     context = runtime.default_context()
     state.display = xlib.OpenDisplay(nil)
+    defer state.display = nil
+    defer xlib.CloseDisplay(state.display)
     state.screen = xlib.DefaultScreen(state.display)
-
-    @static visual_attribs := []i32 {
-        glx.X_RENDERABLE, 1,
-        glx.DRAWABLE_TYPE, glx.WINDOW_BIT,
-        glx.RENDER_TYPE, glx.RGBA_BIT,
-        glx.X_VISUAL_TYPE, glx.TRUE_COLOR,
-        glx.RED_SIZE, 8,
-        glx.GREEN_SIZE, 8,
-        glx.BLUE_SIZE, 8,
-        glx.ALPHA_SIZE, 8,
-        glx.DEPTH_SIZE, 24,
-        glx.STENCIL_SIZE, 8,
-        glx.DOUBLEBUFFER, 1,
-        glx.NONE
-    }
-
     major, minor: i32
     res := glx.QueryVersion(state.display, &major, &minor)
     if (!res) || (major == 1 && minor < 3) || (major < 1) do return
     fb_count: i32
-    fb_config := glx.ChooseFBConfig(state.display, state.screen, raw_data(visual_attribs), &fb_count) 
-
+    fb_config := glx.ChooseFBConfig(state.display, state.screen, nil, &fb_count) 
+    if fb_config == nil do return
     best_fbc, worst_fbc, best_num_samp, worst_num_samp := i32(-1), i32(-1), i32(-1), i32(999)
-    if fb_config == nil do return 
-    for &c, i in fb_config[:fb_count] {
-        visual_info := glx.GetVisualFromFBConfig(state.display, c)
-        samp_buf, samples: i32 
+    for c, i in fb_config[:fb_count] {
+        visual_info :^xlib.XVisualInfo = glx.GetVisualFromFBConfig(state.display, c)
+        if visual_info == nil do continue
+        defer xlib.Free(visual_info)
+        samp_buf, samples: i32 = 0, 0
         glx.GetFBConfigAttrib(state.display, c, glx.SAMPLE_BUFFERS, &samp_buf)
         glx.GetFBConfigAttrib(state.display, c, glx.SAMPLES, &samples)
         if (best_fbc < 0) || (samp_buf != 0) && (samples > best_num_samp) do best_fbc, best_num_samp = i32(i), samples
         if (worst_fbc < 0) || (samp_buf == 0) || (samples < worst_num_samp) do worst_fbc, worst_num_samp = i32(i), samples
-        xlib.Free(visual_info)
     }
     best_config := fb_config[best_fbc]
     xlib.Free(fb_config)
+
     visual_info := glx.GetVisualFromFBConfig(state.display, best_config)
-    color_map := xlib.CreateColormap(state.display, auto_cast uintptr(state.parent), visual_info.visual, .AllocNone)
+    colormap := xlib.CreateColormap(state.display, auto_cast uintptr(state.parent), visual_info.visual, .AllocNone)
     event_mask := xlib.EventMask { .StructureNotify, .KeyPress, .KeyRelease, .ButtonPress, .ButtonRelease }
     window_attributes := xlib.XSetWindowAttributes {
         background_pixmap = glx.NONE,
+        background_pixel = 0,
         border_pixel = 0,
         event_mask = event_mask,
-        colormap = color_map,
+        colormap = colormap,
     }
-    window_attributes_mask := xlib.WindowAttributeMask {.CWBorderPixel, .CWColormap, .CWEventMask }
+    window_attributes_mask := xlib.WindowAttributeMask {.CWBorderPixel, .CWColormap, .CWEventMask, .CWBackPixel }
     state.window = xlib.CreateWindow(
         state.display,
         auto_cast uintptr(state.parent),
-        0, 0, 100, 100, 
+        0, 0, 200, 200, 
         0,
         visual_info.depth,
         .InputOutput,
@@ -341,208 +346,130 @@ gui_thread :: proc (state: ^GuiState) {
         window_attributes_mask,
         &window_attributes
     )
-    xlib.SelectInput(state.display, state.window, event_mask)
+    defer xlib.DestroyWindow(state.display, state.window)
     xlib.MapWindow(state.display, state.window)
+    xlib.SelectInput(state.display, state.window, event_mask)
     glx_extensions := glx.QueryExtensionsString(state.display, state.screen)
-    GLX_CONTEXT_MAJOR_VERSION_ARB :: 0x2091
-    GLX_CONTEXT_MINOR_VERSION_ARB :: 0x2092
-    glXCreateContextAttribsARBProc :: proc "system" (^xlib.Display, glx.FBConfig, glx.Context, c.bool, [^]i32) -> glx.Context
+    glXCreateContextAttribsARBProc :: proc "c" (^xlib.Display, glx.FBConfig, glx.Context, c.bool, [^]i32) -> glx.Context
     glXCreateContextAttribsARB := glXCreateContextAttribsARBProc(glx.GetProcAddressARB("glXCreateContextAttribsARB"))
     ctx: glx.Context = nil
     if !strings.contains(string(glx_extensions), "GLX_ARB_create_context") || glXCreateContextAttribsARB == nil {
-        fmt.println("notfound")
+        ctx = glx.CreateContext(state.display, visual_info, nil, true)
     } else {
-        context_attribs := []i32 {
-            GLX_CONTEXT_MAJOR_VERSION_ARB, 1,
-            GLX_CONTEXT_MINOR_VERSION_ARB, 0,
-            glx.NONE
-        }
-        ctx = glXCreateContextAttribsARB(state.display, best_config, nil, true, raw_data(context_attribs))
+        ctx = glXCreateContextAttribsARB(state.display, best_config, nil, true, nil)
     }
-    xlib.Sync(state.display)
+    defer glx.DestroyContext(state.display, ctx)
+    gl_set_proc_address :: proc (p: rawptr, name: cstring) {
+        (cast(^rawptr)p)^ = rawptr(glx.GetProcAddress(name))
+    }
 
+    gl.load_up_to(3, 3, gl_set_proc_address)
     glx.MakeCurrent(state.display, auto_cast state.window, ctx );
-    // gl.ClearColor( 0, 0.5, 1, 1 );
-    // gl.Clear( gl.COLOR_BUFFER_BIT );
-    glx.SwapBuffers ( state.display, auto_cast state.window );
-    
+    version := gl.GetString(gl.VERSION)
+    fmt.println("loaded gl context with", version)
 
+    // gl setup
+    vao: u32     
+    gl.GenVertexArrays(1, &vao)
+    gl.BindVertexArray(vao)
+
+    vbo: u32
+    gl.GenBuffers(1, &vbo)
+    gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
+
+    vertices := []f32 {
+        -0.5,  0.5, 0.0, 0.0, 1.0,
+         0.5,  0.5, 0.0, 1.0, 0.0,
+         0.5, -0.5, 1.0, 0.0, 1.0,
+        -0.5, -0.5, 0.0, 1.0, 0.0,
+    }
+    gl.BufferData(gl.ARRAY_BUFFER, size_of(f32) * len(vertices), raw_data(vertices[:]), gl.STATIC_DRAW)
+
+    shader_program, ok := gl.load_shaders_source(string(#load("vertex.glsl")), string(#load("fragment.glsl")))
+    if !ok do return
+
+    gl.BindFragDataLocation(shader_program, 0, "out_colour")
+    gl.UseProgram(shader_program)
+
+    position_attribute := gl.GetAttribLocation(shader_program, "position")
+    gl.EnableVertexAttribArray(auto_cast position_attribute)
+    gl.VertexAttribPointer(auto_cast position_attribute, 2, gl.FLOAT, false, size_of(f32) * 5, 0)
+
+    colour_attribute := gl.GetAttribLocation(shader_program, "in_colour")
+    gl.EnableVertexAttribArray(auto_cast colour_attribute)
+    gl.VertexAttribPointer(auto_cast colour_attribute, 3, gl.FLOAT, false, size_of(f32) * 5, 2 * size_of(f32))
+
+    ebo := u32(0)
+    indicies := []u32 { 0, 1, 2, 2, 3, 0 }
+    gl.GenBuffers(1, &ebo)
+    gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo)
+    gl.BufferData(gl.ELEMENT_ARRAY_BUFFER, size_of(u32) * len(indicies), raw_data(indicies), gl.STATIC_DRAW)
+
+    texture := u32(0)
+    gl.GenTextures(1, &texture)
+    gl.BindTexture(gl.TEXTURE_2D, texture)
+
+    // texture_border_colour := []f32{ 1, 0, 0, 1 }
+    // gl.TextureParameterfv(gl.TEXTURE_2D, gl.TEXTURE_BORDER_COLOR, raw_data(texture_border_colour))
+    //
+    // gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
+    // gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
+    //
+    // gl.GenerateMipmap(gl.TEXTURE_2D)
+    
     for intrinsics.atomic_load(&state.run) {
+        // get audio thread updates
+        start := time.now()
         for p in ParameterId do for {
             v := pop_parameter_update(&state.audio_to_gui[p]) or_break
             state.param_cache[p] = v
         }
+
+        // handle resize
         resize := intrinsics.atomic_load(&state.resize)
         if resize {
+            width := state.width
+            height := state.height
             intrinsics.atomic_store(&state.resize, !resize)
+
+            // TODO(edg): This flickers
+            gl.Viewport(0, 0, i32(width), i32(height))
+            xlib.MoveResizeWindow(state.display, state.window, 0, 0, width, height) 
         }
+
+        // handle events
+        e := xlib.XEvent{}
+        for xlib.CheckWindowEvent(state.display, state.window, event_mask, &e) {
+            #partial switch e.type {
+            case .ButtonPress:
+                current_bypass := state.param_cache[.Bypass]
+                state.param_cache[.Bypass] = 0.0 if current_bypass > 0.5 else 1.0
+                push_parameter_update(&state.gui_to_audio[.Bypass], state.param_cache[.Bypass])
+            }
+        }
+
+        // draw
+        if state.param_cache[.Bypass] > 0.5 {
+            gl.ClearColor( 1, 0, 0, 0 );
+        } else {
+            gl.ClearColor( 0, 1, 0, 0 );
+        }
+
+        gl.Clear( gl.COLOR_BUFFER_BIT );
+        gl.DrawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, nil)
+        // gl.DrawArrays(gl.TRIANGLES, 0, 6)
+
+        glx.SwapBuffers ( state.display, auto_cast state.window );
+        xlib.Sync(state.display)
+
+        // sleep
+        end := time.now()
+        diff := time.duration_nanoseconds(time.diff (start, end))
+        fps_ns:i64 = 1 / (1_000_000 * 60)
+        if diff < fps_ns do time.sleep(auto_cast (fps_ns - diff))
     }
     intrinsics.atomic_store(&state.run, true)
-    // context = runtime.default_context()
-    // state.display = xlib.OpenDisplay(nil)
-    // state.screen = xlib.DefaultScreen(state.display)
-    // state.window = xlib.CreateSimpleWindow(state.display, auto_cast uintptr(state.parent), 0, 0 , 800, 600, 0, 0, xlib.BlackPixel(state.display, state.screen))
-    // state.visual = xlib.DefaultVisual(state.display, state.screen)
-    // mask := xlib.EventMask { .StructureNotify, .KeyPress, .KeyRelease, .ButtonPress, .ButtonRelease }
-    // xlib.SelectInput(state.display, state.window, mask)
-    // xlib.MapWindow(state.display, state.window)
-    // state.gc = xlib.DefaultGC(state.display, state.screen)
-    // for intrinsics.atomic_load(&state.run) {
-    //     for p in ParameterId do for {
-    //         v := pop_parameter_update(&state.audio_to_gui[p]) or_break
-    //         state.param_cache[p] = v
-    //     }
-    //     resize := intrinsics.atomic_load(&state.resize)
-    //     height := state.height
-    //     width := state.width
-    //     if resize {
-    //         if state.image != nil {
-    //             free_all(context.temp_allocator)
-    //             state.image.data = nil
-    //             xlib.DestroyImage(state.image)
-    //             state.image = nil
-    //         }
-    //         state.buffer = make([dynamic]u32, state.width * state.height, context.temp_allocator)
-    //         width = state.width
-    //         height = state.height
-    //         xlib.MoveResizeWindow(state.display, state.window, 0, 0, state.width, state.height) 
-    //         // fill_pixel_buffer(state, state.buffer[:], width, height)
-    //         // state.image = xlib.CreateImage(state.display, state.visual, 24, .ZPixmap, 0, raw_data(state.buffer), width, height, 32, 0)
-    //         // xlib.PutImage(state.display, state.window, state.gc, state.image, 0, 0, 0, 0, width, height)
-    //         xlib.Flush(state.display)
-    //         intrinsics.atomic_store(&state.resize, !resize)
-    //     }
-    //     e := xlib.XEvent{}
-    //     for xlib.CheckWindowEvent(state.display, state.window, mask, &e) {
-    //         #partial switch e.type {
-    //         case .ButtonPress:
-    //             current_bypass := state.param_cache[.Bypass]
-    //             state.param_cache[.Bypass] = 0.0 if current_bypass > 0.5 else 1.0
-    //             push_parameter_update(&state.gui_to_audio[.Bypass], state.param_cache[.Bypass])
-    //         }
-    //     }
-    //     // xlib.PutImage(state.display, state.window, state.gc, state.image, 0, 0, 0, 0, width, height)
-    //     // fill_pixel_buffer(state, state.buffer[:], width, height)
-    //     xlib.Flush(state.display)
-    //     time.accurate_sleep(33300)
-    // }
-    // intrinsics.atomic_store(&state.run, true)
 }
-
-// // Helper function to set a pixel within bounds
-// set_pixel :: proc(buffer: []u32, x, y, width, height: int, color: u32) {
-//     if x >= 0 && y >= 0 && x < width && y < height {
-//         buffer[y * width + x] = color
-//     }
-// }
-//
-// draw_horizontal_line :: proc(buffer: []u32, y, x_start, x_end, width, height  : int, color: u32) {
-//     for x := x_start; x <= x_end; x += 1 {
-//         if x >= 0 && y >= 0 && x < width && y < height {
-//             buffer[y * width + x] = color
-//         }
-//     }
-// }
-//
-// outline_circle :: proc (buffer: []u32, width, height, center_x, center_y, radius: int, color: u32) {
-//     t1 := radius / 16
-//     x := radius
-//     y := 0
-//     for x >= y {
-//         // Set all eight symmetric pixels
-//         set_pixel(buffer, center_x + x, center_y + y, width, height, color)
-//         set_pixel(buffer, center_x - x, center_y + y, width, height, color)
-//         set_pixel(buffer, center_x + x, center_y - y, width, height, color)
-//         set_pixel(buffer, center_x - x, center_y - y, width, height, color)
-//         set_pixel(buffer, center_x + y, center_y + x, width, height, color)
-//         set_pixel(buffer, center_x - y, center_y + x, width, height, color)
-//         set_pixel(buffer, center_x + y, center_y - x, width, height, color)
-//         set_pixel(buffer, center_x - y, center_y - x, width, height, color)
-//         y += 1
-//         t1 += y
-//         t2 := t1 - x
-//         if t2 >= 0 {
-//             t1 = t2
-//             x -= 1
-//         }
-//     }
-// }
-//
-// fill_circle :: proc (buffer: []u32, width, height, center_x, center_y, radius: int, color: u32) {
-//     t1 := radius / 16
-//     x := radius
-//     y := 0
-//     for x >= y {
-//         draw_horizontal_line(buffer, center_y + y, center_x - x, center_x + x, width, height, color)
-//         draw_horizontal_line(buffer, center_y - y, center_x - x, center_x + x, width, height, color)
-//         draw_horizontal_line(buffer, center_y + x, center_x - y, center_x + y, width, height, color)
-//         draw_horizontal_line(buffer, center_y - x, center_x - y, center_x + y, width, height, color)
-//         y += 1
-//         t1 += y
-//         t2 := t1 - x
-//         if t2 >= 0 {
-//             t1 = t2
-//             x -= 1
-//         }
-//     }
-// }
-//
-// draw_filled_pie_slice :: proc "contextless" (buffer: []u32, width, height, center_x, center_y, radius: int, color: u32, start_angle, end_angle: f32) {
-//     t1 := radius / 16
-//     x := radius
-//     y := 0
-//
-//     for x >= y {
-//         // Draw horizontal lines for each segment if they fall within the angle range
-//         draw_pie_slice_horizontal_line(buffer, width, height, center_x, center_y, center_x - x, center_x + x, center_y + y, color, start_angle, end_angle)
-//         draw_pie_slice_horizontal_line(buffer, width, height, center_x, center_y, center_x - x, center_x + x, center_y - y, color, start_angle, end_angle)
-//         draw_pie_slice_horizontal_line(buffer, width, height, center_x, center_y, center_x - y, center_x + y, center_y + x, color, start_angle, end_angle)
-//         draw_pie_slice_horizontal_line(buffer, width, height, center_x, center_y, center_x - y, center_x + y, center_y - x, color, start_angle, end_angle)
-//
-//         y += 1
-//         t1 += y
-//         t2 := t1 - x
-//         if t2 >= 0 {
-//             t1 = t2
-//             x -= 1
-//         }
-//     }
-// }
-//
-// // Helper function to determine if an angle is within the specified range
-// angle_in_range :: proc "contextless" (angle, start, end: f32) -> bool {
-//     return (start <= angle && angle <= end) || (start > end && (angle >= start || angle <= end))
-// }
-//
-// // Helper function to draw a horizontal line for the pie slice if it falls within the angle range
-// draw_pie_slice_horizontal_line :: proc "contextless" (buffer: []u32, width, height, center_x, center_y, x_start, x_end, y: int, color: u32, start_angle, end_angle: f32) {
-//     for x := x_start; x <= x_end; x += 1 {
-//         dx := x - center_x
-//         dy := y - center_y
-//         angle := math.atan2(f32(dy), f32(dx)) * 180.0 / math.PI
-//
-//         // Check if angle is within the specified start and end angle for the slice
-//         if angle_in_range(angle, start_angle, end_angle) {
-//             if x >= 0 && y >= 0 && x < width && y < height {
-//                 buffer[y * width + x] = color
-//             }
-//         }
-//     }
-// }
-//
-// fill_pixel_buffer :: #force_inline proc (state: ^GuiState, buffer: []u32, width: u32, height: u32) { 
-//     for row in 0..<height do for column in 0..<width {
-//         pixel := &buffer[(width * row) + column]
-//         if state.param_cache[.Bypass] > 0.5 {
-//             pixel^ = 0xffff0000 
-//         } else {
-//             pixel^ = 0xff00ff00
-//         }
-//     }
-//     fill_circle(buffer, int(width), int(height), int(width / 2), int(height / 2), 100, 0xff0000ff)
-//      
-//     draw_filled_pie_slice(buffer, int(width), int(height), int(width / 2), int(height / 2), 100, 0xffccaabb, 50, 120)
-// }
 
 start_gui :: proc (gui: ^Gui, parent: rawptr) {
     gui.state.parent = parent
@@ -667,7 +594,7 @@ set_frame :: proc "c" (rawptr, ^vst3.IPlugFrame) -> vst3.Result {
 }
 
 can_resize :: proc "c" (rawptr) -> vst3.Result {
-    return vst3.Result.Ok
+    return vst3.Result.False
 }
 
 check_size_constraint :: proc "c" (this: rawptr, new_size: ^vst3.ViewRect) -> vst3.Result {
@@ -701,6 +628,8 @@ init_view :: proc (v: ^View) {
     v.gui.state.height = GuiInitialHeight
 }
 
+// Processor
+// ===========
 processor_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
     context = runtime.default_context()
     f_unknown_id := parse_uuid (vst3.FUnknown_iid) or_return
@@ -892,6 +821,9 @@ Processor :: struct #packed  {
     ref_count: u32,
 }
 
+// Controller 
+// ===========
+
 controller_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
     context = runtime.default_context()
     f_unknown_id := parse_uuid (vst3.FUnknown_iid) or_return
@@ -930,13 +862,16 @@ set_component_state :: proc "c" (rawptr, ^vst3.IBStream) -> vst3.Result {
 
 controller_set_state :: proc "c" (this: rawptr, stream: ^vst3.IBStream) -> vst3.Result {
     context = runtime.default_context()
+    if stream == nil do return vst3.Result.InvalidArgument
     plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller))
     num_read := i32(0)
     for p in ParameterId {
         param := i32(p)
         value := f64(0) 
         stream->read(&param, size_of(i32), &num_read)
+        if num_read == 0 do continue
         stream->read(&value, size_of(f64) , &num_read)
+        if num_read == 0 do continue
         push_parameter_update(&plugin.state.controller_to_audio[p], value) 
     }
     return vst3.Result.Ok
@@ -944,13 +879,16 @@ controller_set_state :: proc "c" (this: rawptr, stream: ^vst3.IBStream) -> vst3.
 
 controller_get_state :: proc "c" (this: rawptr, stream: ^vst3.IBStream) -> vst3.Result {
     context = runtime.default_context()
+    if stream == nil do return vst3.Result.InvalidArgument
     plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller))
     num_written := i32(0)
     for p in ParameterId {
         param := i32(p)
         value := intrinsics.atomic_load(&plugin.state.param_values[p])
         stream->write(&param, size_of(i32), &num_written)
+        if num_written == 0 do continue
         stream->write(&value, size_of(f64), &num_written)
+        if num_written == 0 do continue
     }
     return vst3.Result.Ok
 }
@@ -1060,6 +998,9 @@ Controller :: struct #packed {
     view: View,
 }
 
+// Component 
+// ===========
+
 component_add_ref :: proc "c" (this: rawptr) -> u32 {
     c: ^Component = auto_cast this
     c.ref_count += 1
@@ -1074,9 +1015,7 @@ component_release :: proc "c" (this: rawptr) -> u32 {
 
 component_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
     context = runtime.default_context()
-
     plugin: ^Plugin = auto_cast this
-
     f_unknown_id := parse_uuid (vst3.FUnknown_iid) or_return
     i_component_id := parse_uuid (vst3.IComponent_iid) or_return
     if slice.equal(id[0:16], i_component_id[0:16]) ||
@@ -1238,6 +1177,8 @@ Component :: struct #packed {
     ref_count: u32,
 }
 
+// Plugin
+// ===========
 make_plugin :: proc () -> ^Plugin {
     p := new (Plugin)
     c := &p.component
@@ -1257,6 +1198,8 @@ Plugin :: struct #packed {
     state: State,
 }
 
+// Factory 
+// ========
 parse_uuid :: proc (id: string) -> (uuid.Identifier, vst3.Result) {
     factory_id, err :=  uuid.read (id) 
     if err != nil {
@@ -1379,8 +1322,8 @@ Factory :: struct #packed {
     ref_count : u32,
 }
 
-x: ^Factory
-
+// Entry
+// ===========
 @export ModuleEntry :: proc "c" () -> bool {
     return true
 }
@@ -1391,6 +1334,7 @@ x: ^Factory
 
 @export GetPluginFactory :: proc "c" () -> ^vst3.IPluginFactory3 {
     context = runtime.default_context()
+    @static x: ^Factory
     if x == nil {
         x = new(Factory)
         x.query_interface = factory_query_interface

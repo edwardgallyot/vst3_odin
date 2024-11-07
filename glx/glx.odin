@@ -7,144 +7,111 @@ import "vendor:x11/xlib"
 
 foreign import gl "system:GL"
 
-VERSION_1_1	 :: 1
-VERSION_1_2	 :: 1
-VERSION_1_3	 :: 1
-VERSION_1_4	 :: 1
-
-EXTENSION_NAME   :: "GLX"
-
-/*
- * Tokens for glXChooseVisual and glXGetConfig:
- */
-USE_GL	 :: 1
-BUFFER_SIZE	 :: 2
-LEVEL	 :: 3
-RGBA	 :: 4
+CONTEXT_MAJOR_VERSION_ARB :: 0x2091
+CONTEXT_MINOR_VERSION_ARB :: 0x2092
+VERSION_1_1 :: 1
+VERSION_1_2 :: 1
+VERSION_1_3 :: 1
+VERSION_1_4 :: 1
+EXTENSION_NAME :: "GLX"
+USE_GL :: 1
+BUFFER_SIZE :: 2
+LEVEL :: 3
+RGBA :: 4
 DOUBLEBUFFER :: 5
-STEREO	 :: 6
-AUX_BUFFERS	 :: 7
-RED_SIZE	 :: 8
-GREEN_SIZE	 :: 9
-BLUE_SIZE	 :: 10
-ALPHA_SIZE	 :: 11
-DEPTH_SIZE	 :: 12
+STEREO :: 6
+AUX_BUFFERS :: 7
+RED_SIZE :: 8
+GREEN_SIZE :: 9
+BLUE_SIZE :: 10
+ALPHA_SIZE :: 11
+DEPTH_SIZE :: 12
 STENCIL_SIZE :: 13
 ACCUM_RED_SIZE :: 14
 ACCUM_GREEN_SIZE :: 15
 ACCUM_BLUE_SIZE :: 16
 ACCUM_ALPHA_SIZE :: 17
-
-
-/*
- * Error codes returned by glXGetConfig:
- */
-BAD_SCREEN	 :: 1
+BAD_SCREEN :: 1
 BAD_ATTRIBUTE :: 2
 NO_EXTENSION :: 3
-BAD_VISUAL	 :: 4
-BAD_CONTEXT	 :: 5
-BAD_VALUE        :: 6
-BAD_ENUM	 :: 7
-
-
-/*
- * GLX 1.1 and later:
- */
-VENDOR	 :: 1
-VERSION	 :: 2
-EXTENSIONS 	 :: 3
-
-
-/*
- * GLX 1.3 and later:
- */ 
-CONFIG_CAVEAT	 :: 0x20
-DONT_CARE		 :: 0xFFFFFFFF
-X_VISUAL_TYPE	 :: 0x22
-TRANSPARENT_TYPE	 :: 0x23
+BAD_VISUAL :: 4
+BAD_CONTEXT :: 5
+BAD_VALUE :: 6
+BAD_ENUM :: 7
+VENDOR :: 1
+VERSION	:: 2
+EXTENSIONS :: 3
+CONFIG_CAVEAT :: 0x20
+DONT_CARE :: 0xFFFFFFFF
+X_VISUAL_TYPE :: 0x22
+TRANSPARENT_TYPE :: 0x23
 TRANSPARENT_INDEX_VALUE :: 0x24
 TRANSPARENT_RED_VALUE :: 0x25
 TRANSPARENT_GREEN_VALUE :: 0x26
 TRANSPARENT_BLUE_VALUE :: 0x27
 TRANSPARENT_ALPHA_VALUE :: 0x28
-WINDOW_BIT		 :: 0x00000001
-PIXMAP_BIT		 :: 0x00000002
-PBUFFER_BIT		 :: 0x00000004
-AUX_BUFFERS_BIT	 :: 0x00000010
+WINDOW_BIT :: 0x00000001
+PIXMAP_BIT :: 0x00000002
+PBUFFER_BIT	:: 0x00000004
+AUX_BUFFERS_BIT :: 0x00000010
 FRONT_LEFT_BUFFER_BIT :: 0x00000001
 FRONT_RIGHT_BUFFER_BIT :: 0x00000002
 BACK_LEFT_BUFFER_BIT :: 0x00000004
 BACK_RIGHT_BUFFER_BIT :: 0x00000008
-DEPTH_BUFFER_BIT	 :: 0x00000020
-STENCIL_BUFFER_BIT	 :: 0x00000040
-ACCUM_BUFFER_BIT	 :: 0x00000080
-NONE		 :: 0x8000
-SLOW_CONFIG		 :: 0x8001
-TRUE_COLOR		 :: 0x8002
-DIRECT_COLOR	 :: 0x8003
-PSEUDO_COLOR	 :: 0x8004
-STATIC_COLOR	 :: 0x8005
-GRAY_SCALE		 :: 0x8006
-STATIC_GRAY		 :: 0x8007
-TRANSPARENT_RGB	 :: 0x8008
-TRANSPARENT_INDEX	 :: 0x8009
-VISUAL_ID		 :: 0x800B
-SCREEN		 :: 0x800C
+DEPTH_BUFFER_BIT :: 0x00000020
+STENCIL_BUFFER_BIT :: 0x00000040
+ACCUM_BUFFER_BIT :: 0x00000080
+NONE :: 0x8000
+SLOW_CONFIG	:: 0x8001
+TRUE_COLOR :: 0x8002
+DIRECT_COLOR :: 0x8003
+PSEUDO_COLOR :: 0x8004
+STATIC_COLOR :: 0x8005
+GRAY_SCALE :: 0x8006
+STATIC_GRAY	:: 0x8007
+TRANSPARENT_RGB	:: 0x8008
+TRANSPARENT_INDEX :: 0x8009
+VISUAL_ID :: 0x800B
+SCREEN :: 0x800C
 NON_CONFORMANT_CONFIG :: 0x800D
-DRAWABLE_TYPE	 :: 0x8010
-RENDER_TYPE		 :: 0x8011
-X_RENDERABLE	 :: 0x8012
-FBCONFIG_ID		 :: 0x8013
-RGBA_TYPE		 :: 0x8014
-COLOR_INDEX_TYPE	 :: 0x8015
-MAX_PBUFFER_WIDTH	 :: 0x8016
-MAX_PBUFFER_HEIGHT	 :: 0x8017
-MAX_PBUFFER_PIXELS	 :: 0x8018
-PRESERVED_CONTENTS	 :: 0x801B
-LARGEST_PBUFFER	 :: 0x801C
-WIDTH		 :: 0x801D
-HEIGHT		 :: 0x801E
-EVENT_MASK		 :: 0x801F
-DAMAGED		 :: 0x8020
-SAVED		 :: 0x8021
-WINDOW		 :: 0x8022
-PBUFFER		 :: 0x8023
-PBUFFER_HEIGHT              :: 0x8040
-PBUFFER_WIDTH               :: 0x8041
-RGBA_BIT		 :: 0x00000001
-COLOR_INDEX_BIT	 :: 0x00000002
+DRAWABLE_TYPE :: 0x8010
+RENDER_TYPE	:: 0x8011
+X_RENDERABLE :: 0x8012
+FBCONFIG_ID :: 0x8013
+RGBA_TYPE :: 0x8014
+COLOR_INDEX_TYPE :: 0x8015
+MAX_PBUFFER_WIDTH :: 0x8016
+MAX_PBUFFER_HEIGHT :: 0x8017
+MAX_PBUFFER_PIXELS :: 0x8018
+PRESERVED_CONTENTS :: 0x801B
+LARGEST_PBUFFER	:: 0x801C
+WIDTH :: 0x801D
+HEIGHT :: 0x801E
+EVENT_MASK :: 0x801F
+DAMAGED :: 0x8020
+SAVED :: 0x8021
+WINDOW :: 0x8022
+PBUFFER	:: 0x8023
+PBUFFER_HEIGHT :: 0x8040
+PBUFFER_WIDTH :: 0x8041
+RGBA_BIT :: 0x00000001
+COLOR_INDEX_BIT :: 0x00000002
 PBUFFER_CLOBBER_MASK :: 0x08000000
-
-/*
- * GLX 1.4 and later:
- */
-SAMPLE_BUFFERS              :: 0x186a0 /*100000*/
-SAMPLES                     :: 0x186a1 /*100001*/
-
+SAMPLE_BUFFERS :: 0x186a0 
+SAMPLES :: 0x186a1 
 Context :: rawptr 
 FBConfig :: rawptr 
 XID :: c.ulong
 Pixmap :: XID
 Drawable :: XID
-/* GLX 1.3 and later */
-// typedef struct __GLXFBConfigRec *GLXFBConfig;
 FBConfigID :: XID
 ContextID :: XID
 Window :: XID
 Pbuffer :: XID
-
-
-/*
-** Events.
-** __GLX_NUMBER_EVENTS is set to 17 to account for the BufferClobberSGIX
-**  event - this helps initialization if the server supports the pbuffer
-**  extension and the client doesn't.
-*/
 PbufferClobber :: 0
-BufferSwapComplete :: 1
-
+BufferSwapIsComplete :: 1
 NUMBER_EVENTS :: 17
+extFuncPtr :: proc "system" ()
 
 foreign gl {
     @(link_name="glXChooseVisual") ChooseVisual :: proc "system" (^xlib.Display, i32, [^]i32) -> ^xlib.XVisualInfo ---
@@ -185,230 +152,116 @@ foreign gl {
     @(link_name="glXQueryContext") QueryContext :: proc "system" (^xlib.Display, Context, i32, ^i32) -> i32 ---
     @(link_name="glXSelectEvent") SelectEvent :: proc "system" (^xlib.Display, Drawable, c.ulong)  ---
     @(link_name="glXGetSelectedEvent") GetSelectedEvent :: proc "system" (^xlib.Display, Drawable, ^c.ulong) ---
-    @(link_name="glXGetProcAddressARB") GetProcAddressARB :: proc "system" (cstring) -> rawptr ---
+    @(link_name="glXGetProcAddressARB") GetProcAddressARB :: proc "system" (cstring) -> extFuncPtr ---
+    @(link_name="glXGetProcAddress") GetProcAddress :: proc "system" (cstring) -> extFuncPtr ---
+    @(link_name="glXBindTexImageEXT") BindTexImageEXT :: proc "system" (^xlib.Display, Drawable, i32, [^]i32) ---
+    @(link_name="glXReleaseTexImageEXT") ReleaseTexImageEXT :: proc "system" (^xlib.Display, Drawable, i32) ---
+    @(link_name="glXSwapIntervalMESA") SwapIntervalMESA ::proc "system"(u32) -> i32 ---
+    @(link_name="glXGetSwapIntervalMESA") GetSwapIntervalMESA :: proc "system" () -> i32 ---
+    @(link_name="glXAllocateMemoryNV") AllocateMemoryNV :: proc "system" (int, f32, f32, f32) -> rawptr ---
+    @(link_name="glXFreeMemoryNV") FreeMemoryNV :: proc "system" (rawptr) ---
+    @(link_name="glXBindTexImageARB") BindTexImageARB :: proc "system" (^xlib.Display, Pbuffer, i32)-> c.bool ---
+    @(link_name="glXReleaseTexImageARB") ReleaseTexImageARB :: proc "system" (^xlib.Display, Pbuffer, i32) -> c.bool ---
+    @(link_name="glXDrawableAttribARB") DrawableAttribARB :: proc "system" (^xlib.Display, Drawable, [^]i32) -> c.bool ---
+    @(link_name="glXGetFrameUsageMESA") GetFrameUsageMESA :: proc "system" (^xlib.Display, Drawable, ^f32) -> i32 ---
+    @(link_name="glXBeginFrameTrackingMESA") BeginFrameTrackingMESA :: proc "system" (^xlib.Display, Drawable) -> i32 ---
+    @(link_name="glXEndFrameTrackingMESA") EndFrameTrackingMESA :: proc "system" (^xlib.Display, Drawable) -> i32 ---
+    @(link_name="glXQueryFrameTrackingMESA") QueryFrameTrackingMESA :: proc "system" (^xlib.Display, Drawable, ^i64, ^i64, ^f32) -> i32 ---
 }
 
-// /* GLX 1.3 function pointer typedefs */
-// typedef GLXFBConfig * (* PFNGLXGETFBCONFIGSPROC) (Display *dpy, int screen, int *nelements);
-// typedef GLXFBConfig * (* PFNGLXCHOOSEFBCONFIGPROC) (Display *dpy, int screen, const int *attrib_list, int *nelements);
-// typedef int (* PFNGLXGETFBCONFIGATTRIBPROC) (Display *dpy, GLXFBConfig config, int attribute, int *value);
-// typedef XVisualInfo * (* PFNGLXGETVISUALFROMFBCONFIGPROC) (Display *dpy, GLXFBConfig config);
-// typedef GLXWindow (* PFNGLXCREATEWINDOWPROC) (Display *dpy, GLXFBConfig config, Window win, const int *attrib_list);
-// typedef void (* PFNGLXDESTROYWINDOWPROC) (Display *dpy, GLXWindow win);
-// typedef GLXPixmap (* PFNGLXCREATEPIXMAPPROC) (Display *dpy, GLXFBConfig config, Pixmap pixmap, const int *attrib_list);
-// typedef void (* PFNGLXDESTROYPIXMAPPROC) (Display *dpy, GLXPixmap pixmap);
-// typedef GLXPbuffer (* PFNGLXCREATEPBUFFERPROC) (Display *dpy, GLXFBConfig config, const int *attrib_list);
-// typedef void (* PFNGLXDESTROYPBUFFERPROC) (Display *dpy, GLXPbuffer pbuf);
-// typedef void (* PFNGLXQUERYDRAWABLEPROC) (Display *dpy, GLXDrawable draw, int attribute, unsigned int *value);
-// typedef GLXContext (* PFNGLXCREATENEWCONTEXTPROC) (Display *dpy, GLXFBConfig config, int render_type, GLXContext share_list, Bool direct);
-// typedef Bool (* PFNGLXMAKECONTEXTCURRENTPROC) (Display *dpy, GLXDrawable draw, GLXDrawable read, GLXContext ctx);
-// typedef GLXDrawable (* PFNGLXGETCURRENTREADDRAWABLEPROC) (void);
-// typedef Display * (* PFNGLXGETCURRENTDISPLAYPROC) (void);
-// typedef int (* PFNGLXQUERYCONTEXTPROC) (Display *dpy, GLXContext ctx, int attribute, int *value);
-// typedef void (* PFNGLXSELECTEVENTPROC) (Display *dpy, GLXDrawable draw, unsigned long event_mask);
-// typedef void (* PFNGLXGETSELECTEDEVENTPROC) (Display *dpy, GLXDrawable draw, unsigned long *event_mask);
-//
-//
-// /*
-//  * ARB 2. GLX_ARB_get_proc_address
-//  */
-// #ifndef GLX_ARB_get_proc_address
-// #define GLX_ARB_get_proc_address 1
-//
-// typedef void (*__GLXextFuncPtr)(void);
-// extern __GLXextFuncPtr glXGetProcAddressARB (const GLubyte *);
-//
-// #endif /* GLX_ARB_get_proc_address */
-//
-//
-//
-// /* GLX 1.4 and later */
-// extern void (*glXGetProcAddress(const GLubyte *procname))( void );
-//
-// /* GLX 1.4 function pointer typedefs */
-// typedef __GLXextFuncPtr (* PFNGLXGETPROCADDRESSPROC) (const GLubyte *procName);
-//
-//
-// #ifndef GLX_GLXEXT_LEGACY
-//
-// #include <GL/glxext.h>
-//
-// #endif /* GLX_GLXEXT_LEGACY */
-//
-//
-// /**
-//  ** The following aren't in glxext.h yet.
-//  **/
-//
-//
-// /*
-//  * ???. GLX_NV_vertex_array_range
-//  */
-// #ifndef GLX_NV_vertex_array_range
-// #define GLX_NV_vertex_array_range
-//
-// extern void *glXAllocateMemoryNV(GLsizei size, GLfloat readfreq, GLfloat writefreq, GLfloat priority);
-// extern void glXFreeMemoryNV(GLvoid *pointer);
-// typedef void * ( * PFNGLXALLOCATEMEMORYNVPROC) (GLsizei size, GLfloat readfreq, GLfloat writefreq, GLfloat priority);
-// typedef void ( * PFNGLXFREEMEMORYNVPROC) (GLvoid *pointer);
-//
-// #endif /* GLX_NV_vertex_array_range */
-//
-//
-// /*
-//  * ARB ?. GLX_ARB_render_texture
-//  * XXX This was never finalized!
-//  */
-// #ifndef GLX_ARB_render_texture
-// #define GLX_ARB_render_texture 1
-//
-// extern Bool glXBindTexImageARB(Display *dpy, GLXPbuffer pbuffer, int buffer);
-// extern Bool glXReleaseTexImageARB(Display *dpy, GLXPbuffer pbuffer, int buffer);
-// extern Bool glXDrawableAttribARB(Display *dpy, GLXDrawable draw, const int *attribList);
-//
-// #endif /* GLX_ARB_render_texture */
-//
-//
-// /*
-//  * Remove this when glxext.h is updated.
-//  */
-// #ifndef GLX_NV_float_buffer
-// #define GLX_NV_float_buffer 1
-//
-// #define GLX_FLOAT_COMPONENTS_NV         0x20B0
-//
-// #endif /* GLX_NV_float_buffer */
-//
-//
-//
-// /*
-//  * #?. GLX_MESA_swap_frame_usage
-//  */
-// #ifndef GLX_MESA_swap_frame_usage
-// #define GLX_MESA_swap_frame_usage 1
-//
-// extern int glXGetFrameUsageMESA(Display *dpy, GLXDrawable drawable, float *usage);
-// extern int glXBeginFrameTrackingMESA(Display *dpy, GLXDrawable drawable);
-// extern int glXEndFrameTrackingMESA(Display *dpy, GLXDrawable drawable);
-// extern int glXQueryFrameTrackingMESA(Display *dpy, GLXDrawable drawable, int64_t *swapCount, int64_t *missedFrames, float *lastMissedUsage);
-//
-// typedef int (*PFNGLXGETFRAMEUSAGEMESAPROC) (Display *dpy, GLXDrawable drawable, float *usage);
-// typedef int (*PFNGLXBEGINFRAMETRACKINGMESAPROC)(Display *dpy, GLXDrawable drawable);
-// typedef int (*PFNGLXENDFRAMETRACKINGMESAPROC)(Display *dpy, GLXDrawable drawable);
-// typedef int (*PFNGLXQUERYFRAMETRACKINGMESAPROC)(Display *dpy, GLXDrawable drawable, int64_t *swapCount, int64_t *missedFrames, float *lastMissedUsage);
-//
-// #endif /* GLX_MESA_swap_frame_usage */
-//
-//
-//
-// /*
-//  * #?. GLX_MESA_swap_control
-//  */
-// #ifndef GLX_MESA_swap_control
-// #define GLX_MESA_swap_control 1
-//
-// extern int glXSwapIntervalMESA(unsigned int interval);
-// extern int glXGetSwapIntervalMESA(void);
-//
-// typedef int (*PFNGLXSWAPINTERVALMESAPROC)(unsigned int interval);
-// typedef int (*PFNGLXGETSWAPINTERVALMESAPROC)(void);
-//
-// #endif /* GLX_MESA_swap_control */
-//
-//
-//
-// /*
-//  * #?. GLX_EXT_texture_from_pixmap
-//  * XXX not finished?
-//  */
-// #ifndef GLX_EXT_texture_from_pixmap
-// #define GLX_EXT_texture_from_pixmap 1
-//
-// #define GLX_BIND_TO_TEXTURE_RGB_EXT        0x20D0
-// #define GLX_BIND_TO_TEXTURE_RGBA_EXT       0x20D1
-// #define GLX_BIND_TO_MIPMAP_TEXTURE_EXT     0x20D2
-// #define GLX_BIND_TO_TEXTURE_TARGETS_EXT    0x20D3
-// #define GLX_Y_INVERTED_EXT                 0x20D4
-//
-// #define GLX_TEXTURE_FORMAT_EXT             0x20D5
-// #define GLX_TEXTURE_TARGET_EXT             0x20D6
-// #define GLX_MIPMAP_TEXTURE_EXT             0x20D7
-//
-// #define GLX_TEXTURE_FORMAT_NONE_EXT        0x20D8
-// #define GLX_TEXTURE_FORMAT_RGB_EXT         0x20D9
-// #define GLX_TEXTURE_FORMAT_RGBA_EXT        0x20DA
-//
-// #define GLX_TEXTURE_1D_BIT_EXT             0x00000001
-// #define GLX_TEXTURE_2D_BIT_EXT             0x00000002
-// #define GLX_TEXTURE_RECTANGLE_BIT_EXT      0x00000004
-//
-// #define GLX_TEXTURE_1D_EXT                 0x20DB
-// #define GLX_TEXTURE_2D_EXT                 0x20DC
-// #define GLX_TEXTURE_RECTANGLE_EXT          0x20DD
-//
-// #define GLX_FRONT_LEFT_EXT                 0x20DE
-// #define GLX_FRONT_RIGHT_EXT                0x20DF
-// #define GLX_BACK_LEFT_EXT                  0x20E0
-// #define GLX_BACK_RIGHT_EXT                 0x20E1
-// #define GLX_FRONT_EXT                      GLX_FRONT_LEFT_EXT
-// #define GLX_BACK_EXT                       GLX_BACK_LEFT_EXT
-// #define GLX_AUX0_EXT                       0x20E2
-// #define GLX_AUX1_EXT                       0x20E3 
-// #define GLX_AUX2_EXT                       0x20E4 
-// #define GLX_AUX3_EXT                       0x20E5 
-// #define GLX_AUX4_EXT                       0x20E6 
-// #define GLX_AUX5_EXT                       0x20E7 
-// #define GLX_AUX6_EXT                       0x20E8
-// #define GLX_AUX7_EXT                       0x20E9 
-// #define GLX_AUX8_EXT                       0x20EA 
-// #define GLX_AUX9_EXT                       0x20EB
-//
-// extern void glXBindTexImageEXT(Display *dpy, GLXDrawable drawable, int buffer, const int *attrib_list);
-// extern void glXReleaseTexImageEXT(Display *dpy, GLXDrawable drawable, int buffer);
-//
-// #endif /* GLX_EXT_texture_from_pixmap */
-//
-//
-//
-//
-// /*** Should these go here, or in another header? */
-// /*
-// ** GLX Events
-// */
-// typedef struct {
-//     int event_type;		/* GLX_DAMAGED or GLX_SAVED */
-//     int draw_type;		/* GLX_WINDOW or GLX_PBUFFER */
-//     unsigned long serial;	/* # of last request processed by server */
-//     Bool send_event;		/* true if this came for SendEvent request */
-//     Display *display;		/* display the event was read from */
-//     GLXDrawable drawable;	/* XID of Drawable */
-//     unsigned int buffer_mask;	/* mask indicating which buffers are affected */
-//     unsigned int aux_buffer;	/* which aux buffer was affected */
-//     int x, y;
-//     int width, height;
-//     int count;			/* if nonzero, at least this many more */
-// } GLXPbufferClobberEvent;
-//
-// typedef struct {
-//     int type;
-//     unsigned long serial;	/* # of last request processed by server */
-//     Bool send_event;		/* true if this came from a SendEvent request */
-//     Display *display;		/* Display the event was read from */
-//     GLXDrawable drawable;	/* drawable on which event was requested in event mask */
-//     int event_type;
-//     int64_t ust;
-//     int64_t msc;
-//     int64_t sbc;
-// } GLXBufferSwapComplete;
-//
-// typedef union __GLXEvent {
-//     GLXPbufferClobberEvent glxpbufferclobber;
-//     GLXBufferSwapComplete glxbufferswapcomplete;
-//     long pad[24];
-// } GLXEvent;
-//
-// #ifdef __cplusplus
-// }
-// #endif
-//
-// #endif
+GETFBCONFIGSPROC :: proc "system" (^xlib.Display, i32, ^i32) -> ^FBConfig    
+CHOOSEFBCONFIGPROC :: proc "system" (^xlib.Display, i32, [^]i32, ^i32) -> [^]FBConfig   
+GETFBCONFIGATTRIBPROC :: proc "system" (^xlib.Display, FBConfig, i32, ^i32) -> int  
+GETVISUALFROMFBCONFIGPROC :: proc "system" (^xlib.Display, FBConfig) -> ^xlib.XVisualInfo  
+CREATEWINDOWPROC :: proc "system" (^xlib.Display, FBConfig, xlib.Window, ^i32) -> Window
+DESTROYWINDOWPROC :: proc "system" (^xlib.Display, Window)
+CREATEPIXMAPPROC :: proc "system" (^xlib.Display, FBConfig, xlib.Pixmap, ^i32) -> Pixmap 
+DESTROYPIXMAPPROC :: proc "system" (^xlib.Display, Pixmap) 
+CREATEPBUFFERPROC :: proc "system" (^xlib.Display, FBConfig, [^]i32) -> Pbuffer 
+DESTROYPBUFFERPROC :: proc "system" (^xlib.Display, Pbuffer) 
+QUERYDRAWABLEPROC :: proc "system" (^xlib.Display, Drawable, i32, ^u32)
+CREATENEWCONTEXTPROC :: proc "system" (^xlib.Display, FBConfig, i32, Context, c.bool) -> Context 
+MAKECONTEXTCURRENTPROC :: proc "system" (^xlib.Display, Drawable, Drawable, Context)  -> c.bool 
+GETCURRENTREADDRAWABLEPROC :: proc "system" () -> Drawable 
+GETCURRENTDISPLAYPROC :: proc "system" () -> ^xlib.Display 
+QUERYCONTEXTPROC :: proc "system" (^xlib.Display, Context, i32, ^i32) -> i32
+SELECTEVENTPROC :: proc "system" (^xlib.Display, Drawable, xlib.EventMask) 
+GETSELECTEDEVENTPROC :: proc "system" (^xlib.Display, Drawable, ^xlib.EventMask) 
+GETPROCADDRESSPROC :: proc "system" (cstring) -> extFuncPtr 
+ALLOCATEMEMORYNVPROC :: proc "system" (int, f32, f32, f32) -> rawptr
+FREEMEMORYNVPROC :: proc "system" (rawptr) 
+GETFRAMEUSAGEMESAPROC :: proc "system" (^xlib.Display, Drawable, ^f32) -> i32
+BEGINFRAMETRACKINGMESAPROC :: proc "system" (^xlib.Display, Drawable) -> i32
+ENDFRAMETRACKINGMESAPROC :: proc "system" (^xlib.Display, Drawable) -> i32
+QUERYFRAMETRACKINGMESAPROC :: proc "system" (^xlib.Display, Drawable, ^i64, ^i64, ^f32) -> i32
+SWAPINTERVALMESAPROC :: proc "system" (u32) -> i32
+GETSWAPINTERVALMESAPROC :: proc "system" () -> i32
+
+BIND_TO_TEXTURE_RGB_EXT :: 0x20D0
+BIND_TO_TEXTURE_RGBA_EXT :: 0x20D1
+BIND_TO_MIPMAP_TEXTURE_EXT :: 0x20D2
+BIND_TO_TEXTURE_TARGETS_EXT :: 0x20D3
+Y_INVERTED_EXT :: 0x20D4
+TEXTURE_FORMAT_EXT :: 0x20D5
+TEXTURE_TARGET_EXT :: 0x20D6
+MIPMAP_TEXTURE_EXT :: 0x20D7
+TEXTURE_FORMAT_NONE_EXT :: 0x20D8
+TEXTURE_FORMAT_RGB_EXT :: 0x20D9
+TEXTURE_FORMAT_RGBA_EXT :: 0x20DA
+TEXTURE_1D_BIT_EXT :: 0x00000001
+TEXTURE_2D_BIT_EXT :: 0x00000002
+TEXTURE_RECTANGLE_BIT_EXT :: 0x00000004
+TEXTURE_1D_EXT :: 0x20DB
+TEXTURE_2D_EXT :: 0x20DC
+TEXTURE_RECTANGLE_EXT :: 0x20DD
+FRONT_LEFT_EXT :: 0x20DE
+FRONT_RIGHT_EXT :: 0x20DF
+BACK_LEFT_EXT :: 0x20E0
+BACK_RIGHT_EXT :: 0x20E1
+FRONT_EXT :: FRONT_LEFT_EXT
+BACK_EXT :: BACK_LEFT_EXT
+AUX0_EXT :: 0x20E2
+AUX1_EXT :: 0x20E3 
+AUX2_EXT :: 0x20E4 
+AUX3_EXT :: 0x20E5 
+AUX4_EXT :: 0x20E6 
+AUX5_EXT :: 0x20E7 
+AUX6_EXT :: 0x20E8
+AUX7_EXT :: 0x20E9 
+AUX8_EXT :: 0x20EA 
+AUX9_EXT :: 0x20EB
+
+
+PbufferClobberEvent :: struct {
+    event_type: i32,		
+    draw_type: i32,		
+    serial: c.ulong,	
+    send_event: c.bool,		
+    display: ^xlib.Display,		
+    drawable: Drawable,	
+    buffer_mask: u32,	
+    aux_buffer: u32,	
+    x, y: i32,
+    width, height: i32,
+    count: i32,			
+}
+
+
+BufferSwapComplete :: struct {
+    type: i32,
+    serial: c.ulong,	
+    send_event: c.bool,		
+    display: ^xlib.Display,		
+    drawable: Drawable,	
+    event_type: i32,
+    ust: i64,
+    msc: i64,
+    sbc: i64,
+}
+
+Event :: struct #raw_union {
+    glxpbufferclobber: PbufferClobberEvent,
+    glxbufferswapcomplete: BufferSwapComplete,
+    pad: [24]c.long,
+}
+
