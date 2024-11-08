@@ -1,7 +1,7 @@
-package main 
+package tone_generator
 
-import "vst3"
-import "glx"
+import vst3 "../../vst3"
+import glx "../../glx"
 
 import "base:intrinsics"
 import "base:runtime"
@@ -33,7 +33,7 @@ ExampleControllerUuid :: "3981d015-fb51-43fb-9deb-03488f84c270"
 
 ExampleUrl :: "www.notgotawebsitem8.com"
 ExampleVendor :: "Noice"
-ExampleName :: "odin"
+ExampleName :: "tone_generator"
 ExampleEmail :: "edgallyot@gmail.com"
 ExampleVersion :: "0.0.1"
 ExampleCategory :: "Audio Module Class"
@@ -404,7 +404,7 @@ gui_thread :: proc (state: ^GuiState) {
     }
     gl.BufferData(gl.ARRAY_BUFFER, size_of(f32) * len(vertices), raw_data(vertices[:]), gl.STATIC_DRAW)
 
-    shader_program, ok := gl.load_shaders_source(string(#load("vertex.glsl")), string(#load("fragment.glsl")))
+    shader_program, ok := gl.load_shaders_source(string(#load("shaders/vertex.glsl")), string(#load("shaders/fragment.glsl")))
     if !ok do return
 
     gl.BindFragDataLocation(shader_program, 0, "out_colour")
