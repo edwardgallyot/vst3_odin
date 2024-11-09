@@ -645,7 +645,9 @@ gui_thread :: proc (state: ^GuiState) {
 
         font_colour : v3
 
-        if state.param_cache[.Bypass] > 0.5 {
+        bypass := state.param_cache[.Bypass] > 0.5
+
+        if bypass {
             gl.ClearColor( dark_blue.r, dark_blue.g, dark_blue.b, 0 )
             font_colour = red
         } else {
@@ -667,6 +669,12 @@ gui_thread :: proc (state: ^GuiState) {
         x : f32 = -string_width_in_pixels(prefix, &font_maps)
         for r in value {
             x += render_character(r, &font_maps, x, -300.0, font_vao, font_colour)
+        }
+
+        help_text :: "Click for Tone!"
+        help_x : f32 = -string_width_in_pixels(help_text, &font_maps) / 2.0
+        if bypass do for r in help_text {
+            help_x +=  render_character(r, &font_maps, help_x, 300.0, font_vao, font_colour)
         }
 
         glx.SwapBuffers ( state.display, auto_cast state.window );
