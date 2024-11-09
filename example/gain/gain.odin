@@ -22,19 +22,18 @@ import "core:unicode/utf16"
 
 import xlib "vendor:x11/xlib"
 import gl "vendor:OpenGL"
-import tt "vendor:stb/truetype"
 
 // TODO(edg): Deallocating memory.
 // TODO(edg): LOGGG!!!!
 
 // Example user data:
 
-ExampleUuid :: "1002df00-56d3-4920-a394-1205f69854a6"
-ExampleControllerUuid :: "3981d015-fb51-43fb-9deb-03488f84c270"
+ExampleUuid :: "b5d9b2be-8b7c-41b2-ae5e-0353511e002f"
+ExampleControllerUuid :: "1e25756a-ac7f-499c-b322-d71df2ae3bed"
 
 ExampleUrl :: "www.notgotawebsitem8.com"
 ExampleVendor :: "Noice"
-ExampleName :: "tone_generator"
+ExampleName :: "gain"
 ExampleEmail :: "edgallyot@gmail.com"
 ExampleVersion :: "0.0.1"
 ExampleCategory :: "Audio Module Class"
@@ -158,14 +157,7 @@ State :: struct {
 
 sample_tick :: proc "contextless" (state: ^State, $T: typeid) -> T {
     for p in ParameterId do tick_interpolator(&state.interpolators[p])
-    two_pi :T : 2.0 * math.PI
-    sine_delta: T = auto_cast (400.0 / state.sample_rate) * two_pi
-    state.sine_phase += auto_cast sine_delta
-    state.sine_phase = math.mod_f32(state.sine_phase, auto_cast two_pi)
-    sample := math.sin(state.sine_phase)
-    sample *= f32(state.interpolators[.Gain].current)
-    sample *= f32(state.interpolators[.Bypass].current)
-    sample *= 0.1
+    sample := 0.1
     return auto_cast sample
 }
 
@@ -201,10 +193,10 @@ denormalise_parameter :: proc "contextless" (p: ParameterId, v: f64) -> f64 {
 }
 
 parameter_string_by_normalised_value :: proc (p: ParameterId, buffer: []byte, normalised: f64) -> string {
-    denormalised := denormalise_parameter(p, normalised)
+    v := denormalise_parameter(p, normalised)
     switch p {
     case .Bypass: 
-        if denormalised > 0.5 {
+        if v > 0.5 {
             return "On"
         } else {
             return "Off"
@@ -216,7 +208,7 @@ parameter_string_by_normalised_value :: proc (p: ParameterId, buffer: []byte, no
         if normalised <= 0 {
             return "-inf"
         }
-        result := strconv.append_float(buffer[:], denormalised, 'f', 2, 64)
+        result := strconv.append_float(buffer[:], v, 'f', 2, 64)
         result = strings.trim (result, "+")
         return result
     }
@@ -254,8 +246,6 @@ channel_count_to_speaker_arrangement :: proc "contextless" (channel_count: u32) 
     }
     return vst3.SpeakerArrangement.Empty
 }
-
-v3 :: [3]f32
 
 GuiInitialWidth :: 400
 GuiInitialHeight :: 400
@@ -389,71 +379,6 @@ create_glx_context :: proc (parent: rawptr) -> (^xlib.Display, xlib.Window, bool
     return display, window, true
 }
 
-// NOTE(edg): yoinked from:
-// https://github.com/bg-thompson/OpenGL-Tutorials-In-Odin/blob/main/Wavy-Words/wavy-words.odin#L44
-// Information needed to render a single letter.
-CharacterTexture :: struct {
-    texID   : u32,
-    width   : i32, 
-    height  : i32,
-    bbox_x  : f32,
-    bbox_y  : f32,
-    advance : f32,
-    bitmap  : [^] byte,
-}
-
-render_character :: proc(r : rune, texture_map: ^map[rune]CharacterTexture,  xpos , ypos : f32, vao : u32, colour: v3) -> (advance : f32) {
-    char_texture := texture_map[r]
-    w := f32(char_texture.width)
-    h := f32(char_texture.height)
-    x := xpos + char_texture.bbox_x
-    y := ypos + char_texture.bbox_y
-    
-    character_vertices : [7 * 6] f32 = {
-        // Position ; Texture Coords
-        x    , y + h,  0, 0, colour.r, colour.g, colour.b,
-        x    , y    ,  0, 1, colour.r, colour.g, colour.b,
-        x + w, y    ,  1, 1, colour.r, colour.g, colour.b,
-        x    , y + h,  0, 0, colour.r, colour.g, colour.b,
-        x + w, y    ,  1, 1, colour.r, colour.g, colour.b,
-        x + w, y + h,  1, 0, colour.r, colour.g, colour.b,
-    }
-
-    gl.BindVertexArray(vao)
-    gl.BindTexture(gl.TEXTURE_2D, char_texture.texID)
-    gl.BufferSubData(gl.ARRAY_BUFFER,               // update vertices
-                     0,                             // offset
-                     size_of(character_vertices),   // size
-                     &character_vertices)           // data
-    // Draw the character!
-    gl.DrawArrays(gl.TRIANGLES, 0, 6)
-    // gl.DrawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, nil)
-    advance = char_texture.advance
-    return
-}
-
-load_shader_program :: proc ($vert: string, $frag: string) -> (u32, bool) {
-    vertex_shader, vertex_ok  := compile_shader_from_file(vert, gl.VERTEX_SHADER)
-    if !vertex_ok do return {}, false
-    fragment_shader, fragment_ok  := compile_shader_from_file(frag, gl.FRAGMENT_SHADER)
-    if !fragment_ok do return {}, false
-    shader_program := gl.CreateProgram()
-    gl.AttachShader(shader_program, vertex_shader)
-    gl.AttachShader(shader_program, fragment_shader)
-    gl.LinkProgram(shader_program)
-    gl.BindFragDataLocation(shader_program, 0, "out_colour")
-    gl.UseProgram(shader_program)
-    return shader_program, true
-}
-
-string_width_in_pixels :: proc(s: string, texture_map: ^map[rune]CharacterTexture) -> (res: f32) {
-    res = 0
-    for r in s {
-        res += texture_map[r].advance
-    }
-    return
-}
-
 gui_thread :: proc (state: ^GuiState) {
     context = runtime.default_context()
 
@@ -462,152 +387,9 @@ gui_thread :: proc (state: ^GuiState) {
         fmt.println("failed to create glx context")
         return
     }
-
-    // create the shader program
-    image_shader_program, image_shader_err := load_shader_program("shaders/image_vertex.glsl", "shaders/image_fragment.glsl")
-    if !image_shader_err do return
     
-    state.display, state.window = display, window    
-    // image loading 
-    image_vao : u32     
-    gl.GenVertexArrays(1, &image_vao)
-    gl.BindVertexArray(image_vao)
-
-    image_vbo : u32
-    gl.GenBuffers(1, &image_vbo)
-    gl.BindBuffer(gl.ARRAY_BUFFER, image_vbo)
-
-    image, err := png.load_from_bytes(#load("asset.png"))
-
-    if err != nil do return
-    defer png.destroy(image)
-
-    image_texture := u32(0)
-    gl.GenTextures(1, &image_texture)
-    gl.BindTexture(gl.TEXTURE_2D, image_texture)
-    gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, i32(image.width), i32(image.height), 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(image.pixels.buf[:]))
-
-    texture_border_colour := []f32{ 0, 0, 0, 0 }
-    gl.TexParameterfv(gl.TEXTURE_2D, gl.TEXTURE_BORDER_COLOR, raw_data(texture_border_colour))
-
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-    gl.GenerateMipmap(gl.TEXTURE_2D)
-
-    image_vertices := []f32 {
-        //Position  Color               Texcoords
-        -0.5,  0.5, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, // Top-left
-         0.5,  0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, // Top-right
-         0.5, -0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, // Bottom-right
-        -0.5, -0.5, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0  // Bottom-left
-    };
-
-    gl.BufferData(gl.ARRAY_BUFFER, size_of(f32) * len(image_vertices), raw_data(image_vertices[:]), gl.STATIC_DRAW)
-
-    position_attribute := gl.GetAttribLocation(image_shader_program, "position")
-    gl.VertexAttribPointer(auto_cast position_attribute, 2, gl.FLOAT, false, size_of(f32) * 8, 0)
-    gl.EnableVertexAttribArray(auto_cast position_attribute)
-
-    colour_attribute := gl.GetAttribLocation(image_shader_program, "in_colour")
-    gl.VertexAttribPointer(auto_cast colour_attribute, 4, gl.FLOAT, false, size_of(f32) * 8, 2 * size_of(f32))
-    gl.EnableVertexAttribArray(auto_cast colour_attribute)
-
-    texture_attribute := gl.GetAttribLocation(image_shader_program, "in_texture_coordinate")
-    gl.VertexAttribPointer(auto_cast texture_attribute, 2, gl.FLOAT, false, size_of(f32) * 8, 6 * size_of(f32))
-    gl.EnableVertexAttribArray(auto_cast texture_attribute)
-
-    ebo := u32(0)
-    indicies := []u32 { 0, 1, 2, 2, 3, 0 }
-    gl.GenBuffers(1, &ebo)
-    gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo)
-    gl.BufferData(gl.ELEMENT_ARRAY_BUFFER, size_of(u32) * len(indicies), raw_data(indicies), gl.STATIC_DRAW)
-
-    // font loading
-    // NOTE(edg): We probably wouldn't do something so inefficient in reality
-    // but for the sake of simplicity we just load on each gui instantiation.
-    font_vao : u32
-    gl.GenVertexArrays(1, &font_vao)
-    gl.BindVertexArray(font_vao)
-
-    font_shader_program, font_shader_err := load_shader_program("shaders/font_vertex.glsl", "shaders/font_fragment.glsl")
-    if !font_shader_err do return
-
-    ttf_bytes := #load("JetBrainsMonoNL-Regular.ttf")
-    font : tt.fontinfo
-    tt.InitFont(&font, raw_data(ttf_bytes), 0)
-
-    gl.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
-    font_maps := make(map[rune]CharacterTexture)
-    character_scale := tt.ScaleForPixelHeight(&font, 50)
-    for c in 32..=126 {
-        index := tt.FindGlyphIndex(&font, rune(c))
-        x, y, w, h : i32
-        bitmap := tt.GetGlyphBitmap(
-            &font,
-            0,
-            character_scale,
-            index,
-            &w, &h, &x, &y
-        )
-        b1, b2, b3, b4 : i32
-        tt.GetGlyphBox(&font, index, &b1, &b2, &b3, &b4)
-
-        raw_advance, raw_bearing : i32
-        tt.GetGlyphHMetrics(&font, index, &raw_advance, &raw_bearing)
-        
-        box_x := character_scale * f32(b1);
-        box_y := character_scale * f32(b2);
-        advance := character_scale * f32(raw_advance)
-        bearing := character_scale * f32(raw_bearing)
-
-        texture_id : u32
-        gl.GenTextures(1, &texture_id)
-        gl.BindTexture(gl.TEXTURE_2D, texture_id)
-        gl.TexImage2D(
-            gl.TEXTURE_2D,
-            0, 
-            gl.RED,
-            w,
-            h,
-            0,
-            gl.RED,
-            gl.UNSIGNED_BYTE,
-            bitmap
-        )
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-
-        ct := CharacterTexture { texture_id, w, h, box_x, box_y, advance, bitmap }
-        font_maps[rune(c)] = ct
-    }
-
-    // NOTE(edg): Bitmaps need freeing
-    font_vbo : u32
-    gl.GenBuffers(1, &font_vbo)
-    gl.BindBuffer(gl.ARRAY_BUFFER, font_vbo)
-    gl.BufferData(gl.ARRAY_BUFFER, size_of(f32) * 7 * 6, nil, gl.DYNAMIC_DRAW)
-
-    // Position / texture position attributes. Don't forget to enable!
-    gl.VertexAttribPointer(0, 2, gl.FLOAT, gl.FALSE, 7 * size_of(f32), 0 * size_of(f32))
-    gl.VertexAttribPointer(1, 2, gl.FLOAT, gl.FALSE, 7 * size_of(f32), 2 * size_of(f32))
-    gl.VertexAttribPointer(2, 3, gl.FLOAT, gl.FALSE, 7 * size_of(f32), 4 * size_of(f32))
-    gl.EnableVertexAttribArray(0)
-    gl.EnableVertexAttribArray(1)
-    gl.EnableVertexAttribArray(2)
-
-    proj_mat := [4] f32 {
-        1/f32(GuiInitialWidth), 0,
-        0, 1/f32(GuiInitialHeight),
-    }
-    gl.UniformMatrix2fv(gl.GetUniformLocation(font_shader_program, "projection"), 1, gl.TRUE, raw_data(proj_mat[:]))
-    gl.Viewport(0, 0, i32(GuiInitialWidth), i32(GuiInitialHeight))
-
-    gl.Enable(gl.BLEND)
-    gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-
-    // main loop
+    state.display, state.window = display, window
+    
     for intrinsics.atomic_load(&state.run) {
         // get audio thread updates
         start := time.now()
@@ -639,43 +421,19 @@ gui_thread :: proc (state: ^GuiState) {
         }
 
         // draw
-        white :: v3{255, 255, 255}
-        dark_blue := v3 {24, 1, 97}  / white
-        red := v3 {235, 54, 120}  / white
-
-        font_colour : v3
-
         if state.param_cache[.Bypass] > 0.5 {
-            gl.ClearColor( dark_blue.r, dark_blue.g, dark_blue.b, 0 )
-            font_colour = red
+            gl.ClearColor( 1, 1, 1, 0 );
         } else {
-            gl.ClearColor( red.r, red.g, red.b, 0 )
-            font_colour = dark_blue
+            gl.ClearColor( 0, 0, 0, 0 );
         }
-
-        gl.UseProgram(image_shader_program)
-        gl.Clear(gl.COLOR_BUFFER_BIT)
-        gl.BindVertexArray(image_vao)
-        gl.BindTexture(gl.TEXTURE_2D, image_texture)
-        gl.DrawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, nil)
-
-        gl.UseProgram(font_shader_program)
-
-        buffer : [512]byte
-        prefix := "  Level: "
-        value := strings.concatenate({prefix, parameter_string_by_normalised_value(.Gain, buffer[:], normalise_parameter(.Gain, state.param_cache[.Gain]))})
-        x : f32 = -string_width_in_pixels(prefix, &font_maps)
-        for r in value {
-            x += render_character(r, &font_maps, x, -300.0, font_vao, font_colour)
-        }
-
+        gl.Clear( gl.COLOR_BUFFER_BIT);
         glx.SwapBuffers ( state.display, auto_cast state.window );
         xlib.Sync(state.display)
 
         // sleep
         end := time.now()
         diff := time.duration_nanoseconds(time.diff (start, end))
-        fps_ns :i64 = 1 / (1_000_000 * 60)
+        fps_ns:i64 = 1 / (1_000_000 * 60)
         if diff < fps_ns do time.sleep(auto_cast (fps_ns - diff))
     }
     intrinsics.atomic_store(&state.run, true)

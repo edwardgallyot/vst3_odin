@@ -1,7 +1,5 @@
 package glx
 
-// foreign import glx "system:GLX"
-
 import "core:c"
 import "vendor:x11/xlib"
 

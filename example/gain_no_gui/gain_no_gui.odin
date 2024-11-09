@@ -22,19 +22,18 @@ import "core:unicode/utf16"
 
 import xlib "vendor:x11/xlib"
 import gl "vendor:OpenGL"
-import tt "vendor:stb/truetype"
 
 // TODO(edg): Deallocating memory.
 // TODO(edg): LOGGG!!!!
 
 // Example user data:
 
-ExampleUuid :: "1002df00-56d3-4920-a394-1205f69854a6"
-ExampleControllerUuid :: "3981d015-fb51-43fb-9deb-03488f84c270"
+ExampleUuid :: "3f23eb1b-4b24-46b7-adb5-ff6d7a129340" 
+ExampleControllerUuid :: "969b14a9-7181-48a6-8f6c-94011fc7140c"
 
 ExampleUrl :: "www.notgotawebsitem8.com"
 ExampleVendor :: "Noice"
-ExampleName :: "tone_generator"
+ExampleName :: "gain_no_gui"
 ExampleEmail :: "edgallyot@gmail.com"
 ExampleVersion :: "0.0.1"
 ExampleCategory :: "Audio Module Class"
@@ -158,14 +157,7 @@ State :: struct {
 
 sample_tick :: proc "contextless" (state: ^State, $T: typeid) -> T {
     for p in ParameterId do tick_interpolator(&state.interpolators[p])
-    two_pi :T : 2.0 * math.PI
-    sine_delta: T = auto_cast (400.0 / state.sample_rate) * two_pi
-    state.sine_phase += auto_cast sine_delta
-    state.sine_phase = math.mod_f32(state.sine_phase, auto_cast two_pi)
-    sample := math.sin(state.sine_phase)
-    sample *= f32(state.interpolators[.Gain].current)
-    sample *= f32(state.interpolators[.Bypass].current)
-    sample *= 0.1
+    sample := 0.0
     return auto_cast sample
 }
 
@@ -201,10 +193,10 @@ denormalise_parameter :: proc "contextless" (p: ParameterId, v: f64) -> f64 {
 }
 
 parameter_string_by_normalised_value :: proc (p: ParameterId, buffer: []byte, normalised: f64) -> string {
-    denormalised := denormalise_parameter(p, normalised)
+    v := denormalise_parameter(p, normalised)
     switch p {
     case .Bypass: 
-        if denormalised > 0.5 {
+        if v > 0.5 {
             return "On"
         } else {
             return "Off"
@@ -216,7 +208,7 @@ parameter_string_by_normalised_value :: proc (p: ParameterId, buffer: []byte, no
         if normalised <= 0 {
             return "-inf"
         }
-        result := strconv.append_float(buffer[:], denormalised, 'f', 2, 64)
+        result := strconv.append_float(buffer[:], v, 'f', 2, 64)
         result = strings.trim (result, "+")
         return result
     }
@@ -253,581 +245,6 @@ channel_count_to_speaker_arrangement :: proc "contextless" (channel_count: u32) 
         return vst3.SpeakerArrangement.StereoSpeaker
     }
     return vst3.SpeakerArrangement.Empty
-}
-
-v3 :: [3]f32
-
-GuiInitialWidth :: 400
-GuiInitialHeight :: 400
-
-Gui :: struct {
-    thread_handle: ^thread.Thread,
-    state: GuiState,
-}
-
-GuiState :: struct #packed {
-    parent: rawptr,
-    run, resize: bool,
-    audio_to_gui, gui_to_audio: ^[ParameterId]ParameterUpdateSpscQueue,
-    width, height: u32,
-    display: ^xlib.Display,
-    window: xlib.Window,
-    buffer: [dynamic]u32,
-    screen: i32,
-    gc: xlib.GC,
-    param_cache: [ParameterId]f64,
-}
-
-compile_shader_from_file :: proc ($file: string, shader_type: u32) -> (u32, bool) {
-    status: i32
-    shader := gl.CreateShader(shader_type)
-    src := cstring(#load(file))
-    gl.ShaderSource(shader, 1, &src, nil)
-    gl.CompileShader(shader)
-
-    if gl.GetShaderiv(shader, gl.COMPILE_STATUS, &status); status != 1 {
-        buffer: [512]u8
-        gl.GetShaderInfoLog(shader, 512, nil, raw_data(buffer[:]))
-        error := cstring(raw_data(buffer[:]))
-        fmt.println("error loading", file, ":", error)
-        return {}, false 
-    }
-    return shader, true 
-}
-
-destroy_glx_context :: proc (parent: rawptr, window: ^xlib.Window, display: ^^xlib.Display, screen: ^xlib.Screen) {
-    xlib.DestroyWindow(display^, window^)
-    xlib.CloseDisplay(display^)
-    display^ = nil
-}
-
-xlib_event_mask :: xlib.EventMask { .StructureNotify, .KeyPress, .KeyRelease, .ButtonPress, .ButtonRelease }
-
-create_glx_context :: proc (parent: rawptr) -> (^xlib.Display, xlib.Window, bool) {
-    display := xlib.OpenDisplay(nil)
-    screen := xlib.DefaultScreen(display)
-    major, minor: i32
-    res := glx.QueryVersion(display, &major, &minor)
-    if (!res) || (major == 1 && minor < 3) || (major < 1) do return {}, {}, false
-    fb_count: i32
-    @static visual_attribs := []i32 {
-        glx.X_RENDERABLE, 1,
-        glx.DRAWABLE_TYPE, glx.WINDOW_BIT,
-        glx.RENDER_TYPE, glx.RGBA_BIT,
-        glx.X_VISUAL_TYPE, glx.TRUE_COLOR,
-        glx.RED_SIZE, 8,
-        glx.GREEN_SIZE, 8,
-        glx.BLUE_SIZE, 8,
-        glx.ALPHA_SIZE, 8,
-        glx.DEPTH_SIZE, 24,
-        glx.STENCIL_SIZE, 8,
-        glx.DOUBLEBUFFER, 1,
-        glx.NONE
-    }
-    // try our ideal attribs
-    fb_config := glx.ChooseFBConfig(display, screen, raw_data(visual_attribs), &fb_count) 
-    // try any attribs 
-    if fb_config == nil do fb_config = glx.ChooseFBConfig(display, screen, nil, &fb_count)
-    // TODO(edg): Log critical for the ui thread??
-    if fb_config == nil do return {}, {}, false
-    best_fbc, worst_fbc, best_num_samp, worst_num_samp := i32(-1), i32(-1), i32(-1), i32(999)
-    for c, i in fb_config[:fb_count] {
-        visual_info :^xlib.XVisualInfo = glx.GetVisualFromFBConfig(display, c)
-        if visual_info == nil do continue
-        defer xlib.Free(visual_info)
-        samp_buf, samples: i32 = 0, 0
-        glx.GetFBConfigAttrib(display, c, glx.SAMPLE_BUFFERS, &samp_buf)
-        glx.GetFBConfigAttrib(display, c, glx.SAMPLES, &samples)
-        if (best_fbc < 0) || (samp_buf != 0) && (samples > best_num_samp) do best_fbc, best_num_samp = i32(i), samples
-        if (worst_fbc < 0) || (samp_buf == 0) || (samples < worst_num_samp) do worst_fbc, worst_num_samp = i32(i), samples
-    }
-    best_config := fb_config[best_fbc]
-    xlib.Free(fb_config)
-
-    visual_info := glx.GetVisualFromFBConfig(display, best_config)
-    colormap := xlib.CreateColormap(display, auto_cast uintptr(parent), visual_info.visual, .AllocNone)
-    window_attributes := xlib.XSetWindowAttributes {
-        background_pixmap = glx.NONE,
-        background_pixel = 0,
-        border_pixel = 0,
-        event_mask = xlib_event_mask,
-        colormap = colormap,
-    }
-    window_attributes_mask := xlib.WindowAttributeMask {.CWBorderPixel, .CWColormap, .CWEventMask, .CWBackPixel }
-    window := xlib.CreateWindow(
-        display,
-        auto_cast uintptr(parent),
-        0, 0, GuiInitialWidth, GuiInitialHeight, 
-        0,
-        visual_info.depth,
-        .InputOutput,
-        visual_info.visual,
-        window_attributes_mask,
-        &window_attributes
-    )
-    xlib.MapWindow(display, window)
-    xlib.SelectInput(display, window, xlib_event_mask)
-    glx_extensions := glx.QueryExtensionsString(display, screen)
-    glXCreateContextAttribsARBProc :: proc "c" (^xlib.Display, glx.FBConfig, glx.Context, c.bool, [^]i32) -> glx.Context
-    glXCreateContextAttribsARB := glXCreateContextAttribsARBProc(glx.GetProcAddressARB("glXCreateContextAttribsARB"))
-    ctx: glx.Context = nil
-    if !strings.contains(string(glx_extensions), "GLX_ARB_create_context") || glXCreateContextAttribsARB == nil {
-        ctx = glx.CreateContext(display, visual_info, nil, true)
-    } else {
-        ctx = glXCreateContextAttribsARB(display, best_config, nil, true, nil)
-    }
-    defer glx.DestroyContext(display, ctx)
-    gl_set_proc_address :: proc (p: rawptr, name: cstring) {
-        (cast(^rawptr)p)^ = rawptr(glx.GetProcAddress(name))
-    }
-    gl.load_up_to(3, 3, gl_set_proc_address)
-    if !glx.MakeCurrent(display, auto_cast window, ctx ) do return {}, {}, false
-
-    xlib.Sync(display)
-    version := gl.GetString(gl.VERSION)
-    fmt.println("loaded gl context with", version)
-    return display, window, true
-}
-
-// NOTE(edg): yoinked from:
-// https://github.com/bg-thompson/OpenGL-Tutorials-In-Odin/blob/main/Wavy-Words/wavy-words.odin#L44
-// Information needed to render a single letter.
-CharacterTexture :: struct {
-    texID   : u32,
-    width   : i32, 
-    height  : i32,
-    bbox_x  : f32,
-    bbox_y  : f32,
-    advance : f32,
-    bitmap  : [^] byte,
-}
-
-render_character :: proc(r : rune, texture_map: ^map[rune]CharacterTexture,  xpos , ypos : f32, vao : u32, colour: v3) -> (advance : f32) {
-    char_texture := texture_map[r]
-    w := f32(char_texture.width)
-    h := f32(char_texture.height)
-    x := xpos + char_texture.bbox_x
-    y := ypos + char_texture.bbox_y
-    
-    character_vertices : [7 * 6] f32 = {
-        // Position ; Texture Coords
-        x    , y + h,  0, 0, colour.r, colour.g, colour.b,
-        x    , y    ,  0, 1, colour.r, colour.g, colour.b,
-        x + w, y    ,  1, 1, colour.r, colour.g, colour.b,
-        x    , y + h,  0, 0, colour.r, colour.g, colour.b,
-        x + w, y    ,  1, 1, colour.r, colour.g, colour.b,
-        x + w, y + h,  1, 0, colour.r, colour.g, colour.b,
-    }
-
-    gl.BindVertexArray(vao)
-    gl.BindTexture(gl.TEXTURE_2D, char_texture.texID)
-    gl.BufferSubData(gl.ARRAY_BUFFER,               // update vertices
-                     0,                             // offset
-                     size_of(character_vertices),   // size
-                     &character_vertices)           // data
-    // Draw the character!
-    gl.DrawArrays(gl.TRIANGLES, 0, 6)
-    // gl.DrawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, nil)
-    advance = char_texture.advance
-    return
-}
-
-load_shader_program :: proc ($vert: string, $frag: string) -> (u32, bool) {
-    vertex_shader, vertex_ok  := compile_shader_from_file(vert, gl.VERTEX_SHADER)
-    if !vertex_ok do return {}, false
-    fragment_shader, fragment_ok  := compile_shader_from_file(frag, gl.FRAGMENT_SHADER)
-    if !fragment_ok do return {}, false
-    shader_program := gl.CreateProgram()
-    gl.AttachShader(shader_program, vertex_shader)
-    gl.AttachShader(shader_program, fragment_shader)
-    gl.LinkProgram(shader_program)
-    gl.BindFragDataLocation(shader_program, 0, "out_colour")
-    gl.UseProgram(shader_program)
-    return shader_program, true
-}
-
-string_width_in_pixels :: proc(s: string, texture_map: ^map[rune]CharacterTexture) -> (res: f32) {
-    res = 0
-    for r in s {
-        res += texture_map[r].advance
-    }
-    return
-}
-
-gui_thread :: proc (state: ^GuiState) {
-    context = runtime.default_context()
-
-    display, window, ok := create_glx_context(state.parent)
-    if !ok {
-        fmt.println("failed to create glx context")
-        return
-    }
-
-    // create the shader program
-    image_shader_program, image_shader_err := load_shader_program("shaders/image_vertex.glsl", "shaders/image_fragment.glsl")
-    if !image_shader_err do return
-    
-    state.display, state.window = display, window    
-    // image loading 
-    image_vao : u32     
-    gl.GenVertexArrays(1, &image_vao)
-    gl.BindVertexArray(image_vao)
-
-    image_vbo : u32
-    gl.GenBuffers(1, &image_vbo)
-    gl.BindBuffer(gl.ARRAY_BUFFER, image_vbo)
-
-    image, err := png.load_from_bytes(#load("asset.png"))
-
-    if err != nil do return
-    defer png.destroy(image)
-
-    image_texture := u32(0)
-    gl.GenTextures(1, &image_texture)
-    gl.BindTexture(gl.TEXTURE_2D, image_texture)
-    gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, i32(image.width), i32(image.height), 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(image.pixels.buf[:]))
-
-    texture_border_colour := []f32{ 0, 0, 0, 0 }
-    gl.TexParameterfv(gl.TEXTURE_2D, gl.TEXTURE_BORDER_COLOR, raw_data(texture_border_colour))
-
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-    gl.GenerateMipmap(gl.TEXTURE_2D)
-
-    image_vertices := []f32 {
-        //Position  Color               Texcoords
-        -0.5,  0.5, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, // Top-left
-         0.5,  0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, // Top-right
-         0.5, -0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, // Bottom-right
-        -0.5, -0.5, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0  // Bottom-left
-    };
-
-    gl.BufferData(gl.ARRAY_BUFFER, size_of(f32) * len(image_vertices), raw_data(image_vertices[:]), gl.STATIC_DRAW)
-
-    position_attribute := gl.GetAttribLocation(image_shader_program, "position")
-    gl.VertexAttribPointer(auto_cast position_attribute, 2, gl.FLOAT, false, size_of(f32) * 8, 0)
-    gl.EnableVertexAttribArray(auto_cast position_attribute)
-
-    colour_attribute := gl.GetAttribLocation(image_shader_program, "in_colour")
-    gl.VertexAttribPointer(auto_cast colour_attribute, 4, gl.FLOAT, false, size_of(f32) * 8, 2 * size_of(f32))
-    gl.EnableVertexAttribArray(auto_cast colour_attribute)
-
-    texture_attribute := gl.GetAttribLocation(image_shader_program, "in_texture_coordinate")
-    gl.VertexAttribPointer(auto_cast texture_attribute, 2, gl.FLOAT, false, size_of(f32) * 8, 6 * size_of(f32))
-    gl.EnableVertexAttribArray(auto_cast texture_attribute)
-
-    ebo := u32(0)
-    indicies := []u32 { 0, 1, 2, 2, 3, 0 }
-    gl.GenBuffers(1, &ebo)
-    gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo)
-    gl.BufferData(gl.ELEMENT_ARRAY_BUFFER, size_of(u32) * len(indicies), raw_data(indicies), gl.STATIC_DRAW)
-
-    // font loading
-    // NOTE(edg): We probably wouldn't do something so inefficient in reality
-    // but for the sake of simplicity we just load on each gui instantiation.
-    font_vao : u32
-    gl.GenVertexArrays(1, &font_vao)
-    gl.BindVertexArray(font_vao)
-
-    font_shader_program, font_shader_err := load_shader_program("shaders/font_vertex.glsl", "shaders/font_fragment.glsl")
-    if !font_shader_err do return
-
-    ttf_bytes := #load("JetBrainsMonoNL-Regular.ttf")
-    font : tt.fontinfo
-    tt.InitFont(&font, raw_data(ttf_bytes), 0)
-
-    gl.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
-    font_maps := make(map[rune]CharacterTexture)
-    character_scale := tt.ScaleForPixelHeight(&font, 50)
-    for c in 32..=126 {
-        index := tt.FindGlyphIndex(&font, rune(c))
-        x, y, w, h : i32
-        bitmap := tt.GetGlyphBitmap(
-            &font,
-            0,
-            character_scale,
-            index,
-            &w, &h, &x, &y
-        )
-        b1, b2, b3, b4 : i32
-        tt.GetGlyphBox(&font, index, &b1, &b2, &b3, &b4)
-
-        raw_advance, raw_bearing : i32
-        tt.GetGlyphHMetrics(&font, index, &raw_advance, &raw_bearing)
-        
-        box_x := character_scale * f32(b1);
-        box_y := character_scale * f32(b2);
-        advance := character_scale * f32(raw_advance)
-        bearing := character_scale * f32(raw_bearing)
-
-        texture_id : u32
-        gl.GenTextures(1, &texture_id)
-        gl.BindTexture(gl.TEXTURE_2D, texture_id)
-        gl.TexImage2D(
-            gl.TEXTURE_2D,
-            0, 
-            gl.RED,
-            w,
-            h,
-            0,
-            gl.RED,
-            gl.UNSIGNED_BYTE,
-            bitmap
-        )
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-
-        ct := CharacterTexture { texture_id, w, h, box_x, box_y, advance, bitmap }
-        font_maps[rune(c)] = ct
-    }
-
-    // NOTE(edg): Bitmaps need freeing
-    font_vbo : u32
-    gl.GenBuffers(1, &font_vbo)
-    gl.BindBuffer(gl.ARRAY_BUFFER, font_vbo)
-    gl.BufferData(gl.ARRAY_BUFFER, size_of(f32) * 7 * 6, nil, gl.DYNAMIC_DRAW)
-
-    // Position / texture position attributes. Don't forget to enable!
-    gl.VertexAttribPointer(0, 2, gl.FLOAT, gl.FALSE, 7 * size_of(f32), 0 * size_of(f32))
-    gl.VertexAttribPointer(1, 2, gl.FLOAT, gl.FALSE, 7 * size_of(f32), 2 * size_of(f32))
-    gl.VertexAttribPointer(2, 3, gl.FLOAT, gl.FALSE, 7 * size_of(f32), 4 * size_of(f32))
-    gl.EnableVertexAttribArray(0)
-    gl.EnableVertexAttribArray(1)
-    gl.EnableVertexAttribArray(2)
-
-    proj_mat := [4] f32 {
-        1/f32(GuiInitialWidth), 0,
-        0, 1/f32(GuiInitialHeight),
-    }
-    gl.UniformMatrix2fv(gl.GetUniformLocation(font_shader_program, "projection"), 1, gl.TRUE, raw_data(proj_mat[:]))
-    gl.Viewport(0, 0, i32(GuiInitialWidth), i32(GuiInitialHeight))
-
-    gl.Enable(gl.BLEND)
-    gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-
-    // main loop
-    for intrinsics.atomic_load(&state.run) {
-        // get audio thread updates
-        start := time.now()
-        for p in ParameterId do for {
-            v := pop_parameter_update(&state.audio_to_gui[p]) or_break
-            state.param_cache[p] = v
-        }
-
-        // handle resize
-        resize := intrinsics.atomic_load(&state.resize)
-        if resize {
-            width := state.width
-            height := state.height
-            intrinsics.atomic_store(&state.resize, !resize)
-            gl.Viewport(0, 0, i32(width), i32(height))
-            xlib.MoveResizeWindow(state.display, state.window, 0, 0, width, height) 
-            xlib.Sync(state.display)
-        }
-
-        // handle events
-        e := xlib.XEvent{}
-        for xlib.CheckWindowEvent(state.display, state.window, xlib_event_mask, &e) {
-            #partial switch e.type {
-            case .ButtonPress:
-                current_bypass := state.param_cache[.Bypass]
-                state.param_cache[.Bypass] = 0.0 if current_bypass > 0.5 else 1.0
-                push_parameter_update(&state.gui_to_audio[.Bypass], state.param_cache[.Bypass])
-            }
-        }
-
-        // draw
-        white :: v3{255, 255, 255}
-        dark_blue := v3 {24, 1, 97}  / white
-        red := v3 {235, 54, 120}  / white
-
-        font_colour : v3
-
-        if state.param_cache[.Bypass] > 0.5 {
-            gl.ClearColor( dark_blue.r, dark_blue.g, dark_blue.b, 0 )
-            font_colour = red
-        } else {
-            gl.ClearColor( red.r, red.g, red.b, 0 )
-            font_colour = dark_blue
-        }
-
-        gl.UseProgram(image_shader_program)
-        gl.Clear(gl.COLOR_BUFFER_BIT)
-        gl.BindVertexArray(image_vao)
-        gl.BindTexture(gl.TEXTURE_2D, image_texture)
-        gl.DrawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, nil)
-
-        gl.UseProgram(font_shader_program)
-
-        buffer : [512]byte
-        prefix := "  Level: "
-        value := strings.concatenate({prefix, parameter_string_by_normalised_value(.Gain, buffer[:], normalise_parameter(.Gain, state.param_cache[.Gain]))})
-        x : f32 = -string_width_in_pixels(prefix, &font_maps)
-        for r in value {
-            x += render_character(r, &font_maps, x, -300.0, font_vao, font_colour)
-        }
-
-        glx.SwapBuffers ( state.display, auto_cast state.window );
-        xlib.Sync(state.display)
-
-        // sleep
-        end := time.now()
-        diff := time.duration_nanoseconds(time.diff (start, end))
-        fps_ns :i64 = 1 / (1_000_000 * 60)
-        if diff < fps_ns do time.sleep(auto_cast (fps_ns - diff))
-    }
-    intrinsics.atomic_store(&state.run, true)
-}
-
-start_gui :: proc (gui: ^Gui, parent: rawptr) {
-    gui.state.parent = parent
-    intrinsics.atomic_store(&gui.state.run, true)
-    gui.thread_handle = thread.create_and_start_with_poly_data(&gui.state, gui_thread)
-}
-
-finish_gui :: proc "contextless" (gui: ^Gui) {
-    context = runtime.default_context()
-    intrinsics.atomic_store(&gui.state.run, false)
-    for !intrinsics.atomic_load(&gui.state.run) do continue
-    intrinsics.atomic_store(&gui.state.run, false)
-    thread.destroy(gui.thread_handle)
-}
-
-resize_gui :: proc "contextless" (gui: ^Gui, width: u32, height: u32) {
-    state := &gui.state
-    state.width = width
-    state.height = height
-    if intrinsics.atomic_load(&state.run) {
-        intrinsics.atomic_store(&state.resize, true)
-        for intrinsics.atomic_load(&state.resize) do continue
-    }
-}
-
-// COM implmentation
-View :: struct {
-    iface: vst3.IPlugView,
-    using vtbl: vst3.IPlugViewVtbl,
-    ref_count: u32,
-    gui: Gui,
-}
-
-view_query_interface :: proc "c" (this: rawptr, id: [^]u8, obj: ^rawptr) -> vst3.Result {
-    context = runtime.default_context()
-    f_unknown_id := parse_uuid (vst3.FUnknown_iid) or_return
-    i_view_id := parse_uuid (vst3.IPlugView_iid) or_return
-    if slice.equal(id[0:16], i_view_id[0:16]) ||
-       slice.equal(id[0:16], f_unknown_id[0:16]) {
-        obj^ = this
-        return vst3.Result.True
-    }
-    return vst3.Result.NoInterface
-}
-
-view_add_ref :: proc "c" (this: rawptr) -> u32 {
-    v: ^View = auto_cast this
-    v.ref_count += 1
-    return v.ref_count
-}
-
-view_release :: proc "c" (this: rawptr) -> u32 {
-    v: ^View = auto_cast this
-    v.ref_count -= 1
-    return v.ref_count
-}
-
-is_platform_type_supported :: proc "c" (rawptr, cstring) -> vst3.Result {
-    return vst3.Result.Ok
-}
-
-attached :: proc "c" (this: rawptr, handle: rawptr, type: cstring) -> vst3.Result {
-    context = runtime.default_context()
-    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller) - offset_of(Controller, view))
-    v: ^View = auto_cast this
-    v^ = {}
-    init_view(v)
-    gui_state := &v.gui.state
-    gui_state.audio_to_gui = &plugin.state.audio_to_gui
-    gui_state.gui_to_audio = &plugin.state.gui_to_audio
-    intrinsics.atomic_store(&plugin.state.gui_active, true)
-    for p in ParameterId do v.gui.state.param_cache[p] = intrinsics.atomic_load(&plugin.state.param_values[p])
-    start_gui(&v.gui, handle)
-    return vst3.Result.Ok
-}
-
-removed :: proc "c" (this: rawptr) -> vst3.Result {
-    context = runtime.default_context()
-    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller) - offset_of(Controller, view))
-    v: ^View = auto_cast this
-    finish_gui(&v.gui)
-    intrinsics.atomic_store(&plugin.state.gui_active, false)
-    return vst3.Result.Ok
-}
-
-on_wheel :: proc "c" (rawptr, f32) -> vst3.Result {
-    return vst3.Result.Ok
-}
-
-on_key_down :: proc "c" (rawptr, u16, i16, i16) -> vst3.Result {
-    return vst3.Result.Ok
-}
-
-on_key_up :: proc "c" (rawptr, u16, i16, i16) -> vst3.Result {
-    return vst3.Result.Ok
-}
-
-get_size :: proc "c" (this: rawptr, size: ^vst3.ViewRect) -> vst3.Result {
-    v: ^View = auto_cast this
-    state := &v.gui.state
-    size.left = 0 
-    size.top = 0
-    size.right = GuiInitialWidth
-    size.bottom = GuiInitialHeight
-    return vst3.Result.Ok
-}
-
-on_size :: proc "c" (this: rawptr, new_size: ^vst3.ViewRect) -> vst3.Result {
-    v: ^View = auto_cast this
-    resize_gui(&v.gui, GuiInitialWidth, GuiInitialHeight)
-    return vst3.Result.Ok
-}
-
-on_focus :: proc "c" (rawptr, u8) -> vst3.Result {
-    return vst3.Result.NotImplemented
-}
-
-set_frame :: proc "c" (rawptr, ^vst3.IPlugFrame) -> vst3.Result {
-    return vst3.Result.NotImplemented
-}
-
-can_resize :: proc "c" (rawptr) -> vst3.Result {
-    return vst3.Result.False
-}
-
-check_size_constraint :: proc "c" (this: rawptr, new_size: ^vst3.ViewRect) -> vst3.Result {
-    return vst3.Result.NotImplemented
-}
-
-init_view :: proc (v: ^View) {
-    v.query_interface = view_query_interface
-    v.add_ref = view_add_ref
-    v.release = view_release
-    v.is_platform_type_supported = is_platform_type_supported
-    v.attached = attached
-    v.removed = removed
-    v.on_wheel = on_wheel
-    v.on_key_down = on_key_down
-    v.on_key_up = on_key_up
-    v.get_size = get_size
-    v.on_size = on_size
-    v.on_focus = on_focus
-    v.set_frame = set_frame
-    v.can_resize = can_resize
-    v.check_size_constraint = check_size_constraint
-    v.iface.vtbl = &v.vtbl
-    v.gui.state.width = GuiInitialWidth
-    v.gui.state.height = GuiInitialHeight
 }
 
 // Processor
@@ -1132,6 +549,7 @@ get_parameter_value_by_string :: proc "c" (this: rawptr, id: u32, value_string: 
     p := to_parameter_id(id) or_return 
     input := string(value_string)
     res := parameter_denormalised_value_by_string(p, input) or_return
+
     value_out^ = normalise_parameter(p, res)
     return vst3.Result.Ok
 }
@@ -1169,8 +587,7 @@ set_component_handler :: proc "c" (rawptr, ^vst3.IComponentHandler) -> vst3.Resu
 }
 
 create_view :: proc "c" (this: rawptr, name: cstring) -> ^vst3.IPlugView {
-    plugin: ^Plugin = auto_cast (uintptr(this) - offset_of(Plugin, controller))
-    return auto_cast &plugin.controller.view
+    return nil 
 }
 
 init_controller :: proc (c: ^Controller) {
@@ -1191,14 +608,12 @@ init_controller :: proc (c: ^Controller) {
     c.set_component_handler = set_component_handler
     c.create_view = create_view
     c.iface.vtbl = &c.vtbl
-    init_view(&c.view)
 }
 
 Controller :: struct #packed {
     iface: vst3.IEditController,
     using vtbl: vst3.IEditControllerVtbl,
     ref_count: u32,
-    view: View,
 }
 
 // Component 
