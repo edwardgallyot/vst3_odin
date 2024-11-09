@@ -296,6 +296,7 @@ compile_shader_from_file :: proc ($file: string, shader_type: u32) -> (u32, bool
 }
 
 destroy_glx_context :: proc (parent: rawptr, window: ^xlib.Window, display: ^^xlib.Display, screen: ^xlib.Screen) {
+    // glx.DestroyContext(display, ctx)
     xlib.DestroyWindow(display^, window^)
     xlib.CloseDisplay(display^)
     display^ = nil
@@ -376,7 +377,6 @@ create_glx_context :: proc (parent: rawptr) -> (^xlib.Display, xlib.Window, bool
     } else {
         ctx = glXCreateContextAttribsARB(display, best_config, nil, true, nil)
     }
-    defer glx.DestroyContext(display, ctx)
     gl_set_proc_address :: proc (p: rawptr, name: cstring) {
         (cast(^rawptr)p)^ = rawptr(glx.GetProcAddress(name))
     }
