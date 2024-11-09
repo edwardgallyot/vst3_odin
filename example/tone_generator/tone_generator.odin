@@ -402,6 +402,13 @@ CharacterTexture :: struct {
     bitmap  : [^] byte,
 }
 
+render_string :: proc (s: string, texture_map: ^map[rune]CharacterTexture,  xpos , ypos : f32, vao : u32, colour: v3) {
+    x := xpos
+    for r in s {
+        x += render_character(r, texture_map, x, ypos, vao, colour)
+    }
+}
+
 render_character :: proc(r : rune, texture_map: ^map[rune]CharacterTexture,  xpos , ypos : f32, vao : u32, colour: v3) -> (advance : f32) {
     char_texture := texture_map[r]
     w := f32(char_texture.width)
@@ -667,15 +674,11 @@ gui_thread :: proc (state: ^GuiState) {
         prefix := "  Level: "
         value := strings.concatenate({prefix, parameter_string_by_normalised_value(.Gain, buffer[:], normalise_parameter(.Gain, state.param_cache[.Gain]))})
         x : f32 = -string_width_in_pixels(prefix, &font_maps)
-        for r in value {
-            x += render_character(r, &font_maps, x, -300.0, font_vao, font_colour)
-        }
+        render_string(value, &font_maps, x, -300.0, font_vao, font_colour)
 
         help_text :: "Click for Tone!"
-        help_x : f32 = -string_width_in_pixels(help_text, &font_maps) / 2.0
-        if bypass do for r in help_text {
-            help_x +=  render_character(r, &font_maps, help_x, 300.0, font_vao, font_colour)
-        }
+        x = -string_width_in_pixels(help_text, &font_maps) / 2.0
+        if bypass do render_string(help_text, &font_maps, x, 300.0, font_vao, font_colour)
 
         glx.SwapBuffers ( state.display, auto_cast state.window );
         xlib.Sync(state.display)
